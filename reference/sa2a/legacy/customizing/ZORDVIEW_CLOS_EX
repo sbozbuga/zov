@@ -1,0 +1,18 @@
+@EndUserText.label : 'Orderview Ausnahmetabelle Closed'
+@AbapCatalog.enhancement.category : #NOT_EXTENSIBLE
+@AbapCatalog.tableCategory : #TRANSPARENT
+@AbapCatalog.deliveryClass : #C
+@AbapCatalog.dataMaintenance : #ALLOWED
+define table zordview_clos_ex {
+
+  key mandt     : mandt not null;
+  key qmnum     : qmnum not null;
+  key fenum     : felfd not null;
+  anforderer    : zd_anforderer;
+  ausnahmegrund : zd_ausnahmegrund;
+  erdat         : erdat;
+  ernam         : ernam;
+  fin_postdat   : fin_postdat not null;
+  archivflag    : /cellag/archivflag not null;
+
+}

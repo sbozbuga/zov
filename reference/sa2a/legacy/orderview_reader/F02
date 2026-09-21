@@ -1,0 +1,331 @@
+*----------------------------------------------------------------------*
+***INCLUDE /CELLAG/ORDERVIEW_F02 .
+*----------------------------------------------------------------------*
+*&---------------------------------------------------------------------*
+*&      Form  GET_QMNUMP_DATA_NEW
+*&---------------------------------------------------------------------*
+*       Sortierung bei Eingabe beibehalten, doppelte aber entfernen
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM get_qmnump_data_new .
+
+  TYPES:
+    BEGIN OF tys_meldpos,
+      sortf TYPE i,
+      qmnum TYPE qmnum,
+      fenum TYPE fenum,
+    END OF tys_meldpos,
+    tyt_meldpos TYPE STANDARD TABLE OF tys_meldpos.
+
+  DATA:
+    lv_leng    TYPE i,
+    lv_pos     TYPE i,
+    lv_sortf   TYPE i,
+    lv_qmnum   TYPE qmfe-qmnum,
+    lv_fenum   TYPE qmfe-fenum,
+    lt_meldpos TYPE tyt_meldpos,
+    ls_meldpos TYPE tys_meldpos.
+
+  FIELD-SYMBOLS:
+    <ls_meldpos>  TYPE tys_meldpos.
+
+  CLEAR: gt_ordview[], lv_sortf.
+
+  LOOP AT s_qmnump.   "mit Kopfzeile
+    ADD 1 TO lv_sortf. "ursprüngliche Sortierung
+    CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
+      EXPORTING
+        input  = s_qmnump-low
+      IMPORTING
+        output = s_qmnump-low.
+    lv_leng  = strlen( s_qmnump-low ).
+    lv_pos   = lv_leng - 4.
+    IF lv_pos > 4.
+      lv_qmnum = s_qmnump-low(lv_pos).
+      lv_fenum = s_qmnump-low+lv_pos(4).
+    ENDIF.
+
+    ls_meldpos-sortf = lv_sortf.
+    ls_meldpos-qmnum = lv_qmnum.
+    ls_meldpos-fenum = lv_fenum.
+    APPEND ls_meldpos TO lt_meldpos.
+  ENDLOOP.
+
+  "Doppelte entfernen
+  SORT lt_meldpos BY qmnum fenum.
+  DELETE ADJACENT DUPLICATES FROM lt_meldpos  COMPARING qmnum fenum.
+  "Ursprüngliche Sortierung
+  SORT lt_meldpos BY sortf.
+
+  LOOP AT lt_meldpos ASSIGNING  <ls_meldpos>.
+    SELECT *
+      FROM (gv_tabname) APPENDING TABLE gt_ordview
+      WHERE qmnum = <ls_meldpos>-qmnum
+        AND fenum = <ls_meldpos>-fenum.
+    IF gv_auth_arch = abap_true.                            "HB071021
+      SELECT *
+        FROM zordview_archiv APPENDING TABLE gt_ordview
+        WHERE qmnum = <ls_meldpos>-qmnum
+          AND fenum = <ls_meldpos>-fenum.
+    ENDIF.
+  ENDLOOP.
+
+ENDFORM.                    " GET_QMNUMP_DATA_NEW
+*&---------------------------------------------------------------------*
+*&      Form  GET_ADD_DATA
+*&---------------------------------------------------------------------*
+*       ADD-Data und Lieferantendaten lesen und Gesamttabelle aufbauen
+*&---------------------------------------------------------------------*
+FORM get_add_data .
+
+  TYPES:
+    BEGIN OF tys_lfa1,
+      lifnr TYPE lifnr,
+      name1 TYPE name1,
+    END OF tys_lfa1,
+    tyt_lfa1      TYPE HASHED TABLE OF tys_lfa1 WITH UNIQUE KEY lifnr,
+
+    tyt_ord_add   TYPE STANDARD TABLE OF /cellag/ord_add,
+    tyt_ord_add_h TYPE HASHED TABLE OF /cellag/ord_add WITH UNIQUE KEY qmnum fenum.
+
+  DATA:
+    lt_ordview   TYPE STANDARD TABLE OF /cellag/ordview,
+    lt_lfa1      TYPE tyt_lfa1,
+    lt_ord_add   TYPE tyt_ord_add,
+    lt_ord_add_h TYPE tyt_ord_add_h,                        "HB20240410
+    lv_cnt       TYPE felfd.
+
+
+  FIELD-SYMBOLS:
+    <ls_ordview>  TYPE /cellag/ordview,
+    <ls_ord_add>  TYPE /cellag/ord_add,
+    <ls_ord_full> LIKE LINE OF gt_ord_full,
+    <ls_lfa1>     TYPE tys_lfa1.
+
+
+  CHECK NOT gt_ordview[] IS INITIAL.
+
+  "Lieferantendaten lesen
+  lt_ordview[] = gt_ordview[].
+
+  SELECT *                                                  "HB030416
+    FROM /cellag/ord_add
+    INTO TABLE gt_ord_add
+    FOR ALL ENTRIES IN lt_ordview
+    WHERE qmnum = lt_ordview-qmnum.
+
+  IF gv_auth_arch  = abap_true.                             "HB071021
+    SELECT *
+      FROM zord_add_archiv APPENDING TABLE gt_ord_add
+        FOR ALL ENTRIES IN lt_ordview
+        WHERE qmnum = lt_ordview-qmnum.
+
+    SORT gt_ord_add BY qmnum fenum counter.
+    DELETE ADJACENT DUPLICATES FROM gt_ord_add COMPARING qmnum fenum.
+
+  ENDIF.
+
+
+  SORT lt_ordview BY hersteller.
+  DELETE ADJACENT DUPLICATES FROM lt_ordview COMPARING hersteller.
+
+  SELECT lifnr
+         name1
+    FROM lfa1
+    INTO TABLE lt_lfa1
+    FOR ALL ENTRIES IN lt_ordview
+    WHERE lifnr = lt_ordview-hersteller.
+
+  SELECT *
+    FROM /cellag/ord_add
+    INTO TABLE lt_ord_add
+    FOR ALL ENTRIES IN gt_ordview
+    WHERE qmnum = gt_ordview-qmnum
+      AND fenum = gt_ordview-fenum.
+
+  IF gv_auth_arch = abap_true.                              "HB071021
+    SELECT *
+      FROM zord_add_archiv APPENDING TABLE lt_ord_add
+      FOR ALL ENTRIES IN gt_ordview
+      WHERE qmnum = gt_ordview-qmnum
+        AND fenum = gt_ordview-fenum.
+  ENDIF.
+
+  SORT lt_ord_add BY qmnum fenum counter.                   "HB20240410
+  DELETE ADJACENT DUPLICATES FROM lt_ord_add COMPARING qmnum fenum.
+  lt_ord_add_h[] = lt_ord_add[].
+
+  "Mischen
+  LOOP AT gt_ordview ASSIGNING <ls_ordview>.
+
+    INSERT INITIAL LINE INTO TABLE gt_ord_full ASSIGNING <ls_ord_full>.
+    MOVE-CORRESPONDING <ls_ordview> TO <ls_ord_full>.
+
+    "Gesamtnr mit Counter: zuerst in NUMC konvertieren
+    lv_cnt = <ls_ord_full>-counter.
+    CONCATENATE <ls_ord_full>-meldpos lv_cnt INTO <ls_ord_full>-qmnumposcnt.
+
+    IF <ls_ordview>-hersteller IS NOT INITIAL.
+      READ TABLE lt_lfa1 ASSIGNING <ls_lfa1> WITH TABLE KEY lifnr = <ls_ordview>-hersteller.
+      IF sy-subrc = 0.
+        <ls_ord_full>-herstellername = <ls_lfa1>-name1.
+      ENDIF.
+    ENDIF.
+
+    READ TABLE lt_ord_add_h ASSIGNING <ls_ord_add> WITH TABLE KEY qmnum = <ls_ordview>-qmnum
+                                                                  fenum = <ls_ordview>-fenum.
+    IF sy-subrc = 0.
+      MOVE-CORRESPONDING <ls_ord_add> TO  <ls_ord_full>.
+    ENDIF.
+  ENDLOOP.
+
+
+ENDFORM.                    " GET_ADD_DATA
+*&---------------------------------------------------------------------*
+*&      Form  CHANGE_COMMENT_Z1
+*&---------------------------------------------------------------------*
+*       Da gesamte Meldung editiert wird auch alle Aktionen zu der Meld
+*       betrachten; es kann zu jeder Meldungsposition erfasst worden sein
+*       Auch ZX-Meldung Hauptmeldungen Z1 und ZX
+*----------------------------------------------------------------------*
+*      -->P_IF_SELFIELD  text
+*      -->P_LV_ORDADD_EXIST  text
+*----------------------------------------------------------------------*
+FORM change_comment_z1  USING    pu_ordadd_exist TYPE abap_bool
+                        CHANGING pc_selfield     TYPE slis_selfield
+                                 pc_ord_full     TYPE /cellag/ord_full.
+
+
+  DATA: lr_qmnum    TYPE RANGE OF /cellag/ordview-qmnum,
+        ls_qmnum    LIKE LINE OF lr_qmnum,
+        lt_ord_add  TYPE HASHED TABLE OF /cellag/ord_add WITH UNIQUE KEY qmnum fenum counter,
+        lv_title    TYPE text100,
+        lv_answer   TYPE c,
+        lv_question TYPE text100.
+
+
+
+  "--------------------------------------------------------------
+  " Entscheidung, ob mit oder ohne Aktualisierung
+  " ausgesetzt, da viel zu langsam
+  "--------------------------------------------------------------
+
+*  CONCATENATE 'Z1-Meldung'(t16) pc_ord_full-qmnum 'Pflege Kommentare'(t17) INTO lv_title SEPARATED BY space.
+*  lv_question = 'Sofortaktualisierung nach dem Speichern'(t18).
+*  CALL FUNCTION 'POPUP_TO_CONFIRM'
+*    EXPORTING
+*      titlebar       = lv_title
+**     DIAGNOSE_OBJECT             = ' '
+*      text_question  = lv_question
+*      text_button_1  = 'keine'(t19)
+*      icon_button_1  = 'ICON_ACTIVATE'
+*      text_button_2  = 'mit Aktual'(t20)
+*      icon_button_2  = 'ICON_TIME_INA'
+*      default_button = '1'
+**     DISPLAY_CANCEL_BUTTON       = 'X'
+**     USERDEFINED_F1_HELP         = ' '
+**     START_COLUMN   = 25
+**     START_ROW      = 6
+**     POPUP_TYPE     =
+**     IV_QUICKINFO_BUTTON_1       = ' '
+**     IV_QUICKINFO_BUTTON_2       = ' '
+*    IMPORTING
+*      answer         = lv_answer
+** TABLES
+**     PARAMETER      =
+*    EXCEPTIONS
+*      text_not_found = 1
+*      OTHERS         = 2.
+*  IF sy-subrc <> 0 OR lv_answer = 'A'.
+*    RETURN.  "Abbruch raus
+*  ENDIF.
+
+
+
+  ls_qmnum-sign = 'I'.
+  ls_qmnum-option = 'EQ'.
+  ls_qmnum-low  = pc_ord_full-qmnum.
+  APPEND ls_qmnum TO lr_qmnum.
+
+
+  "Meldung editieren
+  SET PARAMETER ID 'IQM' FIELD pc_ord_full-qmnum.
+  CALL TRANSACTION 'IW52' AND SKIP FIRST SCREEN.
+
+*  IF lv_answer = '2'.
+*    "--------------------------------------------------------------
+*    " mit Aktualisierung; Aufruf FETCH-Programm, dauert z.T. mehrere
+*    " Minuten
+*    "--------------------------------------------------------------
+*
+*    WAIT UP TO 1 SECONDS.
+*
+*    "Update /CELLAG/ORD_ADD über Standardreport /CELLAG/ORDER_DATA_FETCH
+*
+*    SUBMIT  /cellag/order_data_fetch  AND RETURN
+*               WITH s_qmnum      IN lr_qmnum
+*               WITH pa_new       = abap_true
+*               WITH pa_test      = abap_false
+*               WITH p_chkarc     = abap_false.
+*
+*    WAIT UP TO 1 SECONDS.
+*
+*    "jetzt GT_ORDER_ADD und GT_ORD_FULL aktualisieren für diese Meldung
+**DATA: gt_ordview LIKE /cellag/ordview OCCURS 0 WITH HEADER LINE,
+**      gt_ord_add LIKE /cellag/ord_add OCCURS 0 WITH HEADER LINE.
+*
+*    "--------------------------------------------------------
+*    " Daten zu /cellag/ord_add neu lesen und aktualisiern
+*    "--------------------------------------------------------
+*    SELECT * FROM /cellag/ord_add
+*      INTO TABLE lt_ord_add
+*      WHERE qmnum = pc_ord_full-qmnum.
+*
+*    "alte Einträge löschen
+*    LOOP AT gt_ord_add WHERE qmnum = pc_ord_full-qmnum.
+*      DELETE gt_ord_add.
+*    ENDLOOP.
+*
+*    APPEND LINES OF lt_ord_add TO gt_ord_add.
+*    SORT gt_ord_add BY qmnum fenum counter.
+*
+*    "--------------------------------------------------------
+*    " Daten zin gt_ordview aktualisiern
+*    "--------------------------------------------------------
+*
+*    LOOP AT gt_ord_full ASSIGNING FIELD-SYMBOL(<ls_ord_full>) WHERE qmnum = pc_ord_full-qmnum.
+*      READ TABLE lt_ord_add ASSIGNING FIELD-SYMBOL(<ls_ord_add>) WITH TABLE KEY qmnum   = <ls_ord_full>-qmnum
+*                                                                                    fenum   = <ls_ord_full>-fenum
+*                                                                                    counter = <ls_ord_full>-counter.
+*      IF sy-subrc = 0.
+*        <ls_ord_full>-qmnum_z2         = <ls_ord_add>-qmnum_z2.
+*        <ls_ord_full>-deliverplan      = <ls_ord_add>-deliverplan.
+*        <ls_ord_full>-actualcommitdate = <ls_ord_add>-actualcommitdate.
+*        <ls_ord_full>-lastcommitdate   = <ls_ord_add>-lastcommitdate.
+*        <ls_ord_full>-deliverplanhist  = <ls_ord_add>-deliverplanhist.
+*        <ls_ord_full>-recommitedhist   = <ls_ord_add>-recommitedhist.
+*        <ls_ord_full>-remarksrs        = <ls_ord_add>-remarksrs.
+*        <ls_ord_full>-timestamprs      = <ls_ord_add>-timestamprs.
+*        <ls_ord_full>-remarksoc        = <ls_ord_add>-remarksoc.
+*        <ls_ord_full>-timestampoc      = <ls_ord_add>-timestampoc.
+*        <ls_ord_full>-remarksvm        = <ls_ord_add>-remarksvm.
+*        <ls_ord_full>-timestampvm      = <ls_ord_add>-timestampvm.
+*        <ls_ord_full>-remarksspm       = <ls_ord_add>-remarksspm.
+*        <ls_ord_full>-timestampspm     = <ls_ord_add>-timestampspm.
+*        <ls_ord_full>-remarkspur       = <ls_ord_add>-remarkspur.
+*        <ls_ord_full>-timestamppur     = <ls_ord_add>-timestamppur.
+*        <ls_ord_full>-remarkslog       = <ls_ord_add>-remarkslog.
+*        <ls_ord_full>-timestamplog     = <ls_ord_add>-timestamplog.
+*        <ls_ord_full>-gsiremarks       = <ls_ord_add>-gsiremarks.
+*        <ls_ord_full>-changes          = <ls_ord_add>-changes.
+*        <ls_ord_full>-status           = <ls_ord_add>-status.
+*        <ls_ord_full>-priority         = <ls_ord_add>-priority.
+*        <ls_ord_full>-aedat            = <ls_ord_add>-aedat.
+*        <ls_ord_full>-aeuhr            = <ls_ord_add>-aeuhr.
+*        <ls_ord_full>-aenam            = <ls_ord_add>-aenam.
+*      ENDIF.
+*    ENDLOOP.
+*  ENDIF.
+ENDFORM.

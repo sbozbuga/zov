@@ -1,0 +1,209 @@
+*&---------------------------------------------------------------------*
+*&  Include           /CELLAG/ORDERVIEW_TOP
+*&---------------------------------------------------------------------*
+
+TYPE-POOLS: slis,
+            kkblo,
+            abap,
+            truxs.
+
+TABLES: /cellag/ordview,
+        /cellag/ord_add,
+
+        zordview_archiv,  "Auftrags- und Meldungsdaten (Haupttabelle)  HB071021
+        zord_add_archiv,     "Auftrags- und Meldungsdaten manuell ergänzt
+
+        /cellag/ord_full,
+        sscrfields.
+
+*-----------------------------------------------------------------------------
+* SPLIT ORDERVIEW; falls Aufruf über Transaktion ZORDVIEW_FR1
+*-----------------------------------------------------------------------------
+DATA:
+  co_tab_ordview TYPE tabname VALUE '/CELLAG/ORDVIEW',      "#EC NOTEXT
+  co_tab_fr1     TYPE tabname VALUE 'ZORDVIEW_FR1',         "#EC NOTEXT
+
+  co_tcode_fr1   TYPE tcode VALUE 'ZORDERVIEW_FR1',
+
+  gv_tabname     TYPE tabname.
+
+* Rückmeldunq
+DATA: BEGIN OF gt_qmfe OCCURS 0,
+        qmnum    LIKE qmel-qmnum,
+        aufnr    LIKE qmel-aufnr,
+        matnr    LIKE qmel-matnr,
+        qmcod    LIKE qmel-qmcod,
+        serialnr LIKE qmel-serialnr,
+        fenum    LIKE qmfe-fenum,
+        erdat    LIKE qmfe-erdat,
+        fetxt    LIKE qmfe-fetxt,
+        fegrp    LIKE qmfe-fegrp,
+        fecod    LIKE qmfe-fecod,
+        otgrp    LIKE qmfe-otgrp,
+        oteil    LIKE qmfe-oteil,
+        kzloesch LIKE qmfe-kzloesch,
+        besz     LIKE qmfe-besz,
+      END OF gt_qmfe.
+
+* Qualitaetsmeldung - Aktionen
+DATA: BEGIN OF gt_qmma_aux OCCURS 0,
+        qmnum  LIKE qmma-qmnum,
+        manum  LIKE qmma-manum,
+        fenum  LIKE qmma-fenum,
+        mngrp  LIKE qmma-mngrp,
+        mncod  LIKE qmma-mncod,
+        matxt  LIKE qmma-matxt,
+        ernam  LIKE qmma-ernam,
+        erdat  LIKE qmma-erdat,
+        aenam  LIKE qmma-aenam,
+        aedat  LIKE qmma-aedat,
+        peter  LIKE qmma-peter,
+        indtx  LIKE qmma-indtx,
+        kzmla  TYPE kzmla,    "HB291123 Sprache Text
+        erzeit LIKE qmma-erzeit,
+        aezeit LIKE qmma-aezeit,
+        qmanum LIKE qmma-qmanum,
+      END OF gt_qmma_aux.
+
+DATA: BEGIN OF gt_qmma OCCURS 0.
+        INCLUDE STRUCTURE gt_qmma_aux.
+        DATA: line(255).
+DATA: END OF gt_qmma.
+
+* Qualitaetsmeldung - Ursachen
+DATA: BEGIN OF gt_qmur OCCURS 0,
+        qmnum LIKE qmur-qmnum,
+        erdat LIKE qmur-erdat,
+        urgrp LIKE qmur-urgrp,
+        urcod LIKE qmur-urcod,
+      END OF gt_qmur.
+
+* Lieferantenstamm
+DATA: BEGIN OF gt_lfa1 OCCURS 0,
+        lifnr LIKE lfa1-lifnr,
+        name1 LIKE lfa1-name1,
+      END OF gt_lfa1.
+
+* Objektliste Instandhaltung
+DATA: gt_objk LIKE objk OCCURS 0 WITH HEADER LINE.
+
+DATA: gt_ordview LIKE /cellag/ordview OCCURS 0 WITH HEADER LINE,
+      gt_ord_add LIKE /cellag/ord_add OCCURS 0 WITH HEADER LINE.
+
+DATA: gwa_ordview LIKE /cellag/ordview,
+      gwa_ord_add LIKE /cellag/ord_add.
+
+DATA: BEGIN OF gt_ord_full OCCURS 0,
+        selected.
+        INCLUDE STRUCTURE /cellag/ord_full.
+      DATA: END OF gt_ord_full.
+DATA: BEGIN OF gt_ordview_qmnump OCCURS 0.
+DATA: qmnump TYPE char16.
+      INCLUDE STRUCTURE gt_ordview.
+      DATA: END OF gt_ordview_qmnump.
+
+DATA: BEGIN OF gt_key OCCURS 0,
+        qmnum   LIKE /cellag/ordview-qmnum,
+        fenum   LIKE /cellag/ordview-fenum,
+        counter LIKE /cellag/ordview-counter,
+      END OF gt_key.
+
+DATA: BEGIN OF gt_detail OCCURS 0,
+        fieldname TYPE tar_fname,
+        scrtext_l TYPE scrtext_l,
+        value     TYPE aqt_txt255,
+        no_out    TYPE flag,
+        col_pos   TYPE sycucol,
+      END OF gt_detail.
+
+* Meldungsarten
+DATA: gt_tq80 LIKE tq80 OCCURS 0 WITH HEADER LINE.
+
+* Code-Texte
+DATA: BEGIN OF gt_qpct OCCURS 0,
+        katalogart LIKE qpct-katalogart,
+        codegruppe LIKE qpct-codegruppe,
+        code       LIKE qpct-code,
+        kurztext   LIKE qpct-kurztext,
+      END OF gt_qpct.
+DATA: gwa_qpct LIKE gt_qpct.
+
+* Codegruppen-Texte
+DATA: BEGIN OF gt_qpgt OCCURS 0,
+        katalogart LIKE qpgt-katalogart,
+        codegruppe LIKE qpgt-codegruppe,
+        kurztext   LIKE qpgt-kurztext,
+      END OF gt_qpgt.
+
+* Alv variables
+DATA: gt_fieldcat TYPE slis_t_fieldcat_alv,
+      gwa_layout  TYPE slis_layout_alv,
+      gwa_variant TYPE disvariant,
+      gv_title    TYPE lvc_title.
+
+* Gloval variables
+DATA: gv_qmnump TYPE char16.   "Selektion Meldung/Pos zum Abscannen
+
+DATA: gv_liefplan(32).
+
+DATA: gv_index_from TYPE syindex,
+      gv_index_to   TYPE syindex.
+
+DATA: gv_repid       TYPE syrepid,
+      gv_tcode       TYPE sytcode,
+      gv_okcode_0300 TYPE syucomm,
+      gv_okcode_0400 TYPE syucomm.
+
+* Ranges
+RANGES: gr_orderdate FOR /cellag/ordview-orderdate,
+        gr_dockdate FOR /cellag/ordview-dockdate,
+        gr_receivedate FOR /cellag/ordview-receivedate,
+        gr_fastart FOR /cellag/ordview-fastart,
+        gr_faend FOR /cellag/ordview-faend,
+        gr_rsende FOR /cellag/ordview-rsende,
+        gr_deliverdate FOR /cellag/ordview-deliverdate,
+        gr_einlagerdate FOR /cellag/ordview-einlagerdate,
+        gr_vendordate FOR /cellag/ordview-vendordate,
+        gr_vendorrueck FOR /cellag/ordview-vendorrueck,
+        gr_auftragsendesoll FOR /cellag/ordview-auftragsendesoll,
+        gr_actualcommitdate FOR /cellag/ord_add-actualcommitdate,
+        gr_dateclosed FOR /cellag/ordview-dateclosed,
+        gr_orderstate FOR /cellag/ordview-orderstatecompl.
+
+DATA: gr_highr TYPE RANGE OF abap_bool WITH HEADER LINE,
+      gr_outof TYPE RANGE OF abap_bool WITH HEADER LINE.
+
+* Constants
+CONSTANTS: c_max_lines_table TYPE sytabix VALUE 9000,
+           c_max_lines_range TYPE sytabix VALUE 3000,
+           c_true            VALUE 'X',
+           c_open            VALUE 'O',
+           c_closed          VALUE 'C',
+           c_deleted         VALUE 'D'.
+
+
+*===========================================================
+* Start of Insertation  CAGGERWAS 20.08.2012
+*===========================================================
+*DATA: ok_code TYPE sy-ucomm.
+
+DATA: gt_outtab TYPE TABLE OF wqmma.
+*DATA: BEGIN OF gt_ord_viele OCCURS 0,
+*      selected.
+*        INCLUDE STRUCTURE /cellag/ord_full.
+*DATA: END OF gt_ord_viele.
+
+DATA: gt_ord_viele TYPE TABLE OF /cellag/ord_full,
+      gs_ord_viele TYPE /cellag/ord_full,
+
+      gv_auth_arch TYPE abap_bool.
+
+*
+*DATA: gr_alv_2000  TYPE REF TO cl_gui_alv_grid,
+*      gr_cont_2000 TYPE REF TO cl_gui_custom_container.
+
+
+
+*===========================================================
+* End of Insertation  CAGGERWAS 20.08.2012
+*===========================================================

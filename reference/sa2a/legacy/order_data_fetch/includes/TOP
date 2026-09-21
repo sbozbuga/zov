@@ -1,0 +1,948 @@
+*&---------------------------------------------------------------------*
+*&  Include           /CELLAG/ORDER_DATA_FETCH_TOP
+*&---------------------------------------------------------------------*
+
+TABLES: qmel,
+        qmfe,
+        mara,
+        makt,
+        qmma,
+        ihpa,
+        sscrfields.
+
+TABLES: /cellag/ordview.
+
+
+TYPES BEGIN OF tys_vbrp.
+TYPES vbeln LIKE vbrk-vbeln.
+TYPES waerk LIKE vbrk-waerk.
+TYPES fkdat LIKE vbrk-fkdat.
+
+* Quick Fix Replace data element VBTYP with data element VBTYPL
+* Transport SA2K902251 MKU20260331 RM S4HANA Custom Code 2.1 ADOPT 2508-614
+* Replaced Code:
+*TYPES: BEGIN OF tys_vbrp,
+*         vbeln LIKE vbrk-vbeln,
+*         waerk LIKE vbrk-waerk,
+*         fkdat LIKE vbrk-fkdat,
+*         vbtyp TYPE vbtyp,                                  "HB200511
+TYPES vbtyp TYPE VBTYPL.                                  "HB200511
+
+* End of Quick Fix
+TYPES posnr LIKE vbrp-posnr.
+TYPES uepos LIKE vbrp-uepos.
+TYPES netwr LIKE vbrp-netwr.
+TYPES vbelv TYPE vbelv.                                  "HB200113
+TYPES posnv TYPE posnv.                                  "HB200113
+TYPES erdat TYPE erdat.                                  "HB130120
+TYPES erzet TYPE erzet.                                  "HB130120
+TYPES END OF tys_vbrp.
+TYPES tyt_vbrp   TYPE STANDARD TABLE OF tys_vbrp.
+TYPES tyt_vbrp_s TYPE SORTED TABLE OF tys_vbrp WITH NON-UNIQUE KEY vbeln uepos.
+TYPES tyt_vbrp2  TYPE SORTED TABLE OF tys_vbrp WITH NON-UNIQUE KEY vbelv posnv.
+
+TYPES BEGIN OF tys_mkpf.
+TYPES mblnr LIKE mkpf-mblnr.
+TYPES mjahr LIKE mkpf-mjahr.
+TYPES bldat LIKE mkpf-bldat.
+TYPES xblnr LIKE mkpf-xblnr.
+TYPES obknr LIKE ser03-obknr.
+TYPES sernr LIKE objk-sernr.
+TYPES END OF tys_mkpf.
+TYPES tyt_mkpf   TYPE STANDARD TABLE OF tys_mkpf.
+TYPES tyt_mkpf_s TYPE SORTED TABLE OF tys_mkpf WITH NON-UNIQUE KEY xblnr sernr.
+
+TYPES BEGIN OF tys_wktps.
+TYPES vbeln      TYPE vbeln.
+TYPES posnr      TYPE posnr.
+TYPES ps_psp_pnr TYPE ps_psp_pnr.
+TYPES END OF tys_wktps.
+TYPES tyt_wktps   TYPE STANDARD TABLE OF tys_wktps.
+TYPES tyt_wktps_h TYPE HASHED TABLE OF tys_wktps WITH UNIQUE KEY vbeln posnr.
+
+TYPES BEGIN OF tys_qmfe.
+TYPES qmnum     LIKE qmel-qmnum.
+TYPES vbeln     LIKE qmel-vbeln.
+TYPES objnr     LIKE qmel-objnr.
+TYPES qmart     TYPE qmart.                              "HB110713
+TYPES fenum     LIKE qmfe-fenum.
+TYPES aedat     LIKE qmfe-aedat.
+TYPES fegrp     LIKE qmfe-fegrp.
+TYPES fecod     LIKE qmfe-fecod.
+TYPES otgrp     LIKE qmfe-otgrp.
+TYPES oteil     LIKE qmfe-oteil.
+TYPES bautl     LIKE qmfe-bautl.
+TYPES erdat     TYPE qmfe-erdat.                         "HB280715
+TYPES erzeit    LIKE qmfe-erzeit.
+TYPES anzfehler LIKE qmfe-anzfehler.
+TYPES kzloesch  LIKE qmfe-kzloesch.
+TYPES usr02     LIKE qmfe-usr02.
+TYPES usr03     LIKE qmfe-usr03.
+TYPES usr08     TYPE qmfe-usr08.                         "HB060514
+"bei der ZX Meldung wird das Feld QMEL-QWRNUM mit der Z1-Meldungsnummer befüllt
+TYPES qwrnum    TYPE qwrnum.                             "HB200514
+TYPES bstnk     TYPE bstnk.                              "HB220115
+TYPES usr18     TYPE qmfe-usr18.                         "HB230918
+TYPES ymds      TYPE qmfe-ymds.                          "HB150619
+TYPES fetxt     TYPE zdfetxt.                            "HB220421
+TYPES END OF tys_qmfe.
+TYPES tyt_qmfe   TYPE STANDARD TABLE OF tys_qmfe.
+TYPES tyt_qmfe_h TYPE HASHED TABLE OF tys_qmfe WITH UNIQUE KEY qmnum fenum.
+
+TYPES BEGIN OF tys_qwrnum.                                 "HB150819
+TYPES qmnum  TYPE qmel-qmnum.
+TYPES qwrnum TYPE qmel-qwrnum.   "Vorlagennummer der Meldung
+TYPES END OF tys_qwrnum.
+TYPES tyt_qwrnum TYPE HASHED TABLE OF tys_qwrnum WITH UNIQUE KEY qmnum.
+
+TYPES BEGIN OF tys_zx_add.                                 "HB200514
+TYPES qmnum         TYPE qmnum.
+TYPES fenum         TYPE fenum.
+TYPES counter       TYPE cim_count.                      "HB300714
+TYPES qwrnum        TYPE qwrnum.
+TYPES purchaseorder TYPE /cellag/purchaseord1.
+"Bei der Kombination Z1-ZX Meldungen gibt es immer nur Einkaufsbelege mit 1 Stück.
+TYPES dockdate      TYPE /cellag/dockdate.
+TYPES labelprint    TYPE /cellag/labelprint.
+TYPES deliverdate   TYPE /cellag/deliverdate.
+TYPES remarksrs     TYPE /cellag/remarksrs.              "HB300714
+TYPES remarksvm     TYPE /cellag/remarksvm.              "HB300714
+TYPES END OF tys_zx_add.
+TYPES tyt_zx_add TYPE STANDARD TABLE OF tys_zx_add.
+
+
+TYPES BEGIN OF tys_liefpos.                                "HB180915
+TYPES vbeln TYPE vbeln_va.
+TYPES uepos TYPE uepos.
+TYPES abgru TYPE abgru_va.
+TYPES END OF tys_liefpos.
+TYPES tyt_liefpos TYPE SORTED TABLE OF tys_liefpos WITH NON-UNIQUE KEY vbeln uepos.
+
+TYPES BEGIN OF tys_lips_ve2.                              "HB090417
+TYPES vbeln TYPE vbeln_co.
+TYPES vbelp TYPE posnr_co.
+TYPES ebeln TYPE ebeln.
+TYPES ebelp TYPE ebelp.
+TYPES lifnr TYPE lifnr.
+TYPES bedat TYPE bedat.
+TYPES name1 TYPE name1_gp.
+TYPES END OF tys_lips_ve2.
+TYPES tyt_lips_ve2   TYPE STANDARD TABLE OF tys_lips_ve2.
+TYPES tyt_lips_ve2_h TYPE HASHED TABLE OF tys_lips_ve2
+WITH UNIQUE KEY vbeln vbelp.
+
+TYPES BEGIN OF tys_orderview.
+         INCLUDE STRUCTURE /cellag/ordview.
+         TYPES:  flag_vbep,
+         flag_lif,
+         flag_ekpo,
+         flag_qmferm,
+         abgru_ret   TYPE abgru_va,                         "HB121213
+         abgru_aedat TYPE aedat,                            "HB141213
+       END OF tys_orderview,
+       tyt_orderview   TYPE STANDARD TABLE OF tys_orderview,
+       tyt_orderview_s TYPE SORTED TABLE OF tys_orderview WITH UNIQUE KEY qmnum fenum counter,
+
+* Auftragsarbeitsvorgang
+       BEGIN OF tys_afvc,
+         aufpl LIKE afvc-aufpl,
+         vornr LIKE afvc-vornr,
+       END OF tys_afvc,
+       tyt_afvc   TYPE STANDARD TABLE OF tys_afvc,
+       tyt_afvc_h TYPE HASHED TABLE OF tys_afvc WITH UNIQUE KEY aufpl,
+
+* Auftragsrückmeldung
+       BEGIN OF tys_afru,
+         aufnr TYPE aufnr,
+         aufpl TYPE co_aufpl,
+         vornr TYPE vornr,
+         rmzhl TYPE co_rmzhl,
+         bemot TYPE bemot,
+       END OF tys_afru,
+       tyt_afru   TYPE STANDARD TABLE OF tys_afru,
+       tyt_afru_h TYPE HASHED TABLE OF tys_afru WITH UNIQUE KEY aufnr aufpl vornr,
+
+       BEGIN OF tys_vbeln_miss,
+         qmnum TYPE qmnum,
+         fenum TYPE felfd,
+         vbeln TYPE vbeln_va,
+*        posnr    TYPE posnr_va,
+       END OF tys_vbeln_miss,
+       tyt_vbeln_miss TYPE STANDARD TABLE OF tys_vbeln_miss,
+
+       BEGIN OF tys_vbkd,
+         vbeln TYPE vbeln,
+         uepos TYPE uepos,
+         posnr TYPE posnr,
+         bemot TYPE bemot,
+       END OF tys_vbkd,
+       tyt_vbkd    TYPE STANDARD TABLE OF tys_vbkd,
+       tyt_vbkd_h  TYPE HASHED TABLE OF tys_vbkd WITH UNIQUE KEY vbeln uepos,
+       tyt_vbkd_h2 TYPE HASHED TABLE OF tys_vbkd WITH UNIQUE KEY vbeln posnr,
+
+       BEGIN OF tys_vbfa,
+         vbelv TYPE vbeln_von,
+         posnv TYPE posnr_von,
+         vbeln TYPE vbeln_nach,
+         posnn TYPE posnr_nach,
+       END OF tys_vbfa,
+       tyt_vbfa    TYPE STANDARD TABLE OF tys_vbfa,
+       tyt_vbfa_h  TYPE HASHED TABLE OF tys_vbfa WITH UNIQUE KEY vbelv posnv,
+       tyt_vbfa_h2 TYPE HASHED TABLE OF tys_vbfa WITH UNIQUE KEY vbeln posnn,
+
+*
+       BEGIN OF tys_vttp,   "Transport
+         tknum      TYPE vttp-tknum,
+         tpnum      TYPE vttp-tpnum,
+         vbeln      TYPE vttp-vbeln,
+         exti1      TYPE vttk-exti1,                        "HB060514
+         datbg      TYPE vttk-datbg,
+         daten      TYPE vttk-daten,                        "HB050615
+         uaten      TYPE vttk-uaten,                        "HB220816
+         tdlnr      TYPE vttk-tdlnr,
+         trackn     TYPE vtrkh-trackn,
+         tracktstmp TYPE vtrkh-tracktstmp,
+         trkstat    TYPE vtrkh-trkstat,
+         xsitd      TYPE xsitd,                             "HB290920
+       END OF tys_vttp,
+       tyt_vttp TYPE SORTED TABLE OF tys_vttp WITH NON-UNIQUE KEY vbeln xsitd,
+
+       BEGIN OF tys_qmma_z1,   "Aktionen auf der Z1/ZX-Meldung
+         qmnum  TYPE qmnum,
+         manum  TYPE aknum,
+         fenum  TYPE fenum,
+         mngrp  TYPE qmma-mngrp,
+         matxt  TYPE qmma-matxt,
+         erdat  TYPE qmma-erdat,
+         ernam  TYPE qmma-ernam,
+         erzeit TYPE qmma-erzeit,
+         aedat  TYPE qmma-aedat,
+         aenam  TYPE qmma-aenam,
+         aezeit TYPE qmma-aezeit,
+
+         indtx  TYPE indltx,   "Langtext zum Objekt vorhanden?
+         kzmla  TYPE kzmla,    "Sprache
+         line   TYPE rtxline,  "konkatenierter Langtext, falls vorhanden
+       END OF tys_qmma_z1,
+       tyt_qmma_z1 TYPE STANDARD TABLE OF tys_qmma_z1,
+
+       BEGIN OF tys_qmma_rem,   "Aktionen lediglich Kommentare
+         qmnum  TYPE qmnum, "Hauptmeldung
+         fenum  TYPE fenum,
+
+         manum  TYPE aknum,
+         mngrp  TYPE qmma-mngrp,
+         aedat  TYPE qmma-aenam,
+         aenam  TYPE qmma-aenam,
+         aezeit TYPE qmma-aezeit,
+         line   TYPE rtxline,  "konkatenierter Langtext, falls vorhanden
+         flag   TYPE romarked, "Markierflag bestehender ADD-Eintrag
+       END OF tys_qmma_rem,
+       tyt_qmma_rem TYPE STANDARD TABLE OF tys_qmma_rem,
+
+       BEGIN OF tys_nomat,   "Kommentare direkt anlegen
+         qmnum    TYPE qmnum, "Hauptmeldung
+         fenum    TYPE fenum,
+         counter  TYPE cim_count,
+         qmnum_z2 TYPE /cellag/qmnum_z2,
+         matxt    TYPE mftext,
+       END OF tys_nomat,   "Kommentare direkt anlegen
+       tyt_nomat TYPE STANDARD TABLE OF tys_nomat.
+
+
+DATA: gt_vbrp        TYPE tyt_vbrp2,
+      gt_wktps_h     TYPE tyt_wktps_h,
+
+      gt_vbkd_sel    TYPE tyt_vbkd,   "HB 140718 Hilfstabelle für Schlüssel sammeln
+      gt_vbkd_h      TYPE tyt_vbkd_h,                       "HB 140718
+
+      gt_zx_add      TYPE tyt_zx_add,                       "HB200514
+      gt_vbeln_miss  TYPE tyt_vbeln_miss,
+      gt_vttp        TYPE tyt_vttp,
+      gt_qmma_rem_z2 TYPE tyt_qmma_rem,
+      gt_qmma_rem_z1 TYPE tyt_qmma_rem.
+
+RANGES: gr_vbeln FOR vbak-vbeln,
+        gr_aufnr FOR ekkn-aufnr,
+        gr_lips FOR lips-vbeln,
+        gr_objnr FOR jest-objnr.
+
+DATA: BEGIN OF gt_value_tab OCCURS 0,
+        katalogart LIKE qpgr-katalogart,
+        codegruppe LIKE qpgr-codegruppe,
+        kurztext   LIKE qpgt-kurztext,
+      END OF gt_value_tab.
+
+* CTDI-Prozesstypen Instandsetzung, Tausch
+DATA: gt_proztyp LIKE /cellag/proztyp OCCURS 0 WITH HEADER LINE.
+
+* Qualitaetsmeldung - Kopf-Positionen
+DATA: gt_qmfe TYPE tys_qmfe OCCURS 0 WITH HEADER LINE.
+
+* Qualitaetsmeldung - Maßnahmen (PEPO-Dockdate)
+DATA: BEGIN OF gt_qmsm_zpepo OCCURS 0,
+        qmnum  LIKE qmsm-qmnum,
+        manum  LIKE qmsm-manum,
+        erldat LIKE qmsm-erldat,
+        fenum  LIKE qmsm-fenum,
+      END OF gt_qmsm_zpepo.
+
+* Meldungsarten
+DATA: gt_tq80 LIKE tq80 OCCURS 0 WITH HEADER LINE.
+
+* Code-Texte
+DATA: BEGIN OF gt_qpct OCCURS 0,
+        katalogart LIKE qpct-katalogart,
+        codegruppe LIKE qpct-codegruppe,
+        code       LIKE qpct-code,
+        kurztext   LIKE qpct-kurztext,
+      END OF gt_qpct.
+
+* Codegruppen-Texte
+DATA: BEGIN OF gt_qpgt OCCURS 0,
+        katalogart LIKE qpgt-katalogart,
+        codegruppe LIKE qpgt-codegruppe,
+        kurztext   LIKE qpgt-kurztext,
+      END OF gt_qpgt.
+
+* Texte zu Anwenderstatus
+DATA: BEGIN OF gt_tj30t OCCURS 0,
+        estat LIKE tj30t-estat,
+        txt04 LIKE tj30t-txt04,
+      END OF gt_tj30t.
+
+* Texte zu Systemstatus
+DATA: BEGIN OF gt_tj02t OCCURS 0,
+        istat LIKE tj02t-istat,
+        txt04 LIKE tj02t-txt04,
+      END OF gt_tj02t.
+
+* Einzelstatus pro Objekt
+DATA: BEGIN OF gt_jest OCCURS 0,
+        objnr LIKE jest-objnr,
+        stat  LIKE jest-stat,
+        inact LIKE jest-inact,
+        chgnr LIKE jest-chgnr,
+        udate LIKE jcds-udate,
+      END OF gt_jest.
+
+DATA: BEGIN OF gt_jest_rm OCCURS 0,
+        objnr LIKE jest-objnr,
+      END OF gt_jest_rm.
+
+DATA: BEGIN OF gt_jcds_e0003 OCCURS 0,
+        objnr LIKE jcds-objnr,
+        chgnr LIKE jcds-chgnr,
+        udate LIKE jcds-udate,
+      END OF gt_jcds_e0003.
+
+DATA: BEGIN OF gt_cdhdr_aufnr OCCURS 0,
+        objectid LIKE cdhdr-objectid,
+        changenr LIKE cdhdr-changenr,
+        udate    LIKE cdhdr-udate,
+      END OF gt_cdhdr_aufnr.
+
+DATA: BEGIN OF gt_cdpos_aufnr OCCURS 0,
+        objectid LIKE cdpos-objectid,
+        changenr LIKE cdpos-changenr,
+      END OF gt_cdpos_aufnr.
+
+DATA: BEGIN OF gt_aufnr_objnr OCCURS 0,
+        aufnr LIKE aufk-aufnr,
+        objnr LIKE aufk-objnr,
+      END OF gt_aufnr_objnr.
+
+* Allgemeine Materialdaten
+DATA: BEGIN OF gt_mara OCCURS 0,
+        matnr LIKE mara-matnr,
+        matkl LIKE mara-matkl,
+        normt LIKE mara-normt,
+        extwg LIKE mara-extwg,
+        mfrpn LIKE mara-mfrpn,
+        mfrnr LIKE mara-mfrnr,
+      END OF gt_mara.
+
+* Materialkurztexte
+DATA: BEGIN OF gt_makt OCCURS 0,
+        matnr LIKE makt-matnr,
+        maktx LIKE makt-maktx,
+      END OF gt_makt.
+
+* Materialbewertung
+DATA: BEGIN OF gt_mbew OCCURS 0,
+        matnr LIKE mbew-matnr,
+        bwkey LIKE mbew-bwkey,
+        verpr LIKE mbew-verpr,
+        stprs LIKE mbew-stprs,
+        peinh LIKE mbew-peinh,
+      END OF gt_mbew.
+
+* Kunden-Material-Info Datentabelle
+DATA: BEGIN OF gt_knmt OCCURS 0,
+        vkorg LIKE knmt-vkorg,
+        vtweg LIKE knmt-vtweg,
+        kunnr LIKE knmt-kunnr,
+        matnr LIKE knmt-matnr,
+        kdmat TYPE matnr_ku,
+      END OF gt_knmt.
+
+* Merkmal
+DATA: BEGIN OF gt_cabn OCCURS 0,
+        atinn LIKE cabn-atinn,
+        atnam LIKE cabn-atnam,
+      END OF gt_cabn.
+
+DATA: BEGIN OF gwa_objek,
+        vkorg LIKE knmt-vkorg,
+        vtweg LIKE knmt-vtweg,
+        kunnr LIKE knmt-kunnr,
+        matnr LIKE knmt-matnr,
+      END OF gwa_objek.
+
+* Ausprägungswerte der Sachmerkmale
+DATA: gt_ausp LIKE ausp OCCURS 0 WITH HEADER LINE,
+      gt_afvc TYPE tyt_afvc_h,
+      gt_afru TYPE tyt_afru_h.
+
+* Verkaufsbeleg: Kopf/Positionsdaten
+TYPES: BEGIN OF tys_vbap,
+         vbeln     LIKE vbap-vbeln,
+         posnr     LIKE vbap-posnr,
+         matnr     LIKE vbap-matnr,
+         pstyv     LIKE vbap-pstyv,
+         uepos     LIKE vbap-uepos,
+         abgru     LIKE vbap-abgru,
+         zmeng     LIKE vbap-zmeng,
+         posex     LIKE vbap-posex,
+         vkgru     LIKE vbap-vkgru,
+         netwr     LIKE vbap-netwr,
+         waerk     LIKE vbap-waerk,
+         kwmeng    LIKE vbap-kwmeng,
+         werks     LIKE vbap-werks,
+         prctr     LIKE vbap-prctr,
+         wktnr     LIKE vbap-wktnr,
+         wktps     LIKE vbap-wktps,
+         qmnum     LIKE vbap-/cellag/qmnum,
+         fenum     LIKE vbap-/cellag/fenum,
+         lgort     TYPE lgort_d,              "HB020213, HB170213
+         erdat     LIKE vbak-erdat,
+         erzet     LIKE vbak-erzet,
+         vkorg     LIKE vbak-vkorg,
+         vtweg     LIKE vbak-vtweg,
+         spart     LIKE vbak-spart,
+         vsbed     LIKE vbak-vsbed,
+         bname     LIKE vbak-bname,
+         bukrs_vf  LIKE vbak-bukrs_vf,
+         ressort   TYPE /cellag/ressort,
+         extkostle TYPE zd_extkostle,
+         kdsachbe  TYPE zd_kdsachbe,
+         fksaa     LIKE vbup-fksaa,
+         gbsta     LIKE vbup-gbsta,
+         gbstk     LIKE vbuk-gbstk,                         "HB201020
+         prsdt     LIKE vbkd-prsdt,
+         bstkd     LIKE vbkd-bstkd,
+         bstkd_e   LIKE vbkd-bstkd_e,
+         posex_e   LIKE vbkd-posex_e,
+         bemot     LIKE vbkd-bemot,
+         aedat     TYPE aedat,                              "HB161213
+         route     TYPE route,                              "HB270614
+       END OF tys_vbap,
+       tyt_vbap TYPE STANDARD TABLE OF tys_vbap.
+
+DATA: gt_vbap TYPE tys_vbap OCCURS 0 WITH HEADER LINE.
+
+TYPES: BEGIN OF tys_marc,                                   "HB230716
+         matnr TYPE matnr,
+         werks TYPE werks_d,
+         sernp TYPE serail,
+         prctr TYPE prctr,
+       END OF tys_marc,
+       tyt_marc TYPE HASHED TABLE OF tys_marc WITH UNIQUE KEY matnr werks.
+
+DATA: gt_marc TYPE tyt_marc.
+
+
+DATA: BEGIN OF gt_vbap_zirl OCCURS 0,
+        vbeln LIKE vbap-vbeln,
+        posnr LIKE vbap-posnr,
+        matnr LIKE vbap-matnr,
+        uepos LIKE vbap-uepos,
+        netwr LIKE vbap-netwr,
+        bemot LIKE vbkd-bemot,
+        fksaa LIKE vbup-fksaa,
+      END OF gt_vbap_zirl.
+
+DATA: BEGIN OF gt_vbap_bil OCCURS 0,     "MK 21.11.2016 Rechnungspositionen
+        vbeln LIKE vbap-vbeln,
+        posnr LIKE vbap-posnr,
+        matnr LIKE vbap-matnr,
+        uepos LIKE vbap-uepos,
+        fksaa LIKE vbup-fksaa,
+      END OF gt_vbap_bil.
+
+DATA: BEGIN OF gt_vbap_zirc OCCURS 0,
+        vbeln LIKE vbap-vbeln,
+        posnr LIKE vbap-posnr,
+        matnr LIKE vbap-matnr,
+        uepos LIKE vbap-uepos,
+        zmeng LIKE vbap-zmeng,
+        netwr LIKE vbap-netwr,
+        waerk LIKE vbap-waerk,
+        werks LIKE vbap-werks,
+      END OF gt_vbap_zirc.
+
+DATA: gt_vbap_aux TYPE tys_vbap OCCURS 0 WITH HEADER LINE,
+      gt_vbap_lif TYPE tys_vbap OCCURS 0 WITH HEADER LINE,
+      gt_vbap_rep TYPE tys_vbap OCCURS 0 WITH HEADER LINE,
+      gt_vbap_ret TYPE tys_vbap OCCURS 0 WITH HEADER LINE.
+
+* Verkaufsbeleg: Einteilungsdaten
+DATA: BEGIN OF gt_vbep_aux OCCURS 0,
+        vbeln LIKE vbep-vbeln,
+        posnr LIKE vbep-posnr,
+        etenr LIKE vbep-etenr,
+        edatu LIKE vbep-edatu,
+        bmeng LIKE vbep-bmeng,
+        aufnr LIKE vbep-aufnr,
+        autyp LIKE aufk-autyp,
+        erdat LIKE aufk-erdat,
+        idat1 LIKE aufk-idat1,
+        idat2 LIKE aufk-idat2,
+        objnr LIKE aufk-objnr,
+        kostv TYPE aufk-kostv,                              "HB040618
+        gltrp LIKE afko-gltrp,
+        rsnum LIKE afko-rsnum,
+        aufpl LIKE afko-aufpl,
+        obknr LIKE ser02-obknr,
+      END OF gt_vbep_aux.
+
+DATA: BEGIN OF gt_vbep OCCURS 0.
+        INCLUDE STRUCTURE gt_vbep_aux.
+        DATA: uepos LIKE vbap-uepos,
+        equnr LIKE objk-equnr,
+        sernr LIKE objk-sernr.
+DATA: END OF gt_vbep.
+
+* Auftragskopfdaten PPS-Aufträge
+DATA: BEGIN OF gt_afko OCCURS 0,
+        aufnr LIKE afko-aufnr,
+        rsnum LIKE afko-rsnum,
+        gamng LIKE afko-gamng,
+      END OF gt_afko.
+
+* Reservierung/Sekundärbedarf
+DATA: BEGIN OF gt_resb OCCURS 0,
+        rsnum LIKE resb-rsnum,
+        rspos LIKE resb-rspos,
+        rsart LIKE resb-rsart,
+        matnr LIKE resb-matnr,
+        bdmng LIKE resb-bdmng,
+        enmng LIKE resb-enmng,
+        aufnr LIKE resb-aufnr,
+        baugr LIKE resb-baugr,
+      END OF gt_resb.
+
+* Auftragskopf Instandhaltung
+DATA: BEGIN OF gt_afih OCCURS 0,
+        aufnr LIKE afih-aufnr,
+        obknr LIKE afih-obknr,
+      END OF gt_afih.
+
+
+* Auftragsrückmeldungen
+*DATA: BEGIN OF gt_afru OCCURS 0,
+*      rueck LIKE afru-rueck,
+*      rmzhl LIKE afru-rmzhl,
+*      aufpl LIKE afru-aufpl,
+*      aufnr LIKE afru-aufnr,
+*      vornr LIKE afru-vornr,
+*      bemot LIKE afru-bemot,
+*      END OF gt_afru.
+
+* Objektliste Instandhaltung
+DATA: gt_objk           LIKE objk OCCURS 0 WITH HEADER LINE,
+      gt_objk_aufnr     LIKE objk OCCURS 0 WITH HEADER LINE,
+      gt_objk_aufnr_gsi LIKE objk OCCURS 0 WITH HEADER LINE.
+
+DATA: BEGIN OF gt_wktnr OCCURS 0,
+        wktnr LIKE vbap-wktnr,
+        wktps LIKE vbap-wktps,
+        wert  TYPE kzwis,
+      END OF gt_wktnr.
+
+* Equipment Stammdaten
+DATA: BEGIN OF gt_equi OCCURS 0,
+        equnr LIKE equi-equnr,
+        serge LIKE equi-serge,
+      END OF gt_equi.
+
+* Faktura
+DATA: BEGIN OF gt_vbfa OCCURS 0,
+        vbelv LIKE vbfa-vbelv,
+        posnv LIKE vbfa-posnv,
+        vbeln LIKE vbfa-vbeln,
+        posnn LIKE vbfa-posnn,
+        waers LIKE vbfa-waers,
+        erdat LIKE vbfa-erdat,
+      END OF gt_vbfa.
+
+* Vertriebsbeleg: Partner
+DATA: BEGIN OF gt_vbpa OCCURS 0,
+        vbeln LIKE vbpa-vbeln,
+        posnr LIKE vbpa-posnr,
+        parvw LIKE vbpa-parvw,
+        kunnr LIKE vbpa-kunnr,
+        adrnr LIKE vbpa-adrnr,
+      END OF gt_vbpa.
+
+* Adressen (Business Address Services)
+DATA: BEGIN OF gt_adrc OCCURS 0,
+        addrnumber LIKE adrc-addrnumber,
+        name1      LIKE adrc-name1,
+        name2      LIKE adrc-name2,
+        name3      LIKE adrc-name3,
+        city1      LIKE adrc-city1,
+        post_code1 LIKE adrc-post_code1,
+        street     LIKE adrc-street,
+        house_num1 LIKE adrc-house_num1,
+        sort1      LIKE adrc-sort1,
+      END OF gt_adrc.
+
+* Maximale Durchlaufzeit eines Reparaturprozesses
+DATA: gt_repdau LIKE /cellag/repdau OCCURS 0 WITH HEADER LINE.
+
+* Lieferung
+DATA: BEGIN OF gt_lips_aux OCCURS 0,
+        vbeln       LIKE likp-vbeln,
+        posnr       LIKE lips-posnr,
+        matnr       LIKE lips-matnr,
+        werks       LIKE lips-werks,
+        lgort       LIKE lips-lgort,
+        lfimg       LIKE lips-lfimg,
+        vgbel       LIKE lips-vgbel,
+        vgpos       LIKE lips-vgpos,
+        /cellag/akz LIKE lips-/cellag/akz,
+        uecha       TYPE uecha,                             "HB201017
+        vbtyp       LIKE likp-vbtyp,
+        vsbed       LIKE likp-vsbed,
+        bldat       LIKE likp-bldat,
+        tddat       LIKE likp-tddat,
+        wadat_ist   LIKE likp-wadat_ist,
+        tduhr       LIKE likp-tduhr,
+        wbsta       LIKE vbup-wbsta,
+        obknr       LIKE ser01-obknr,
+        route       TYPE route,                             "HB270614
+        erdat       TYPE erdat,                             "HB060216
+      END OF gt_lips_aux.
+
+DATA: BEGIN OF gt_lips_lif OCCURS 0.
+        INCLUDE STRUCTURE gt_lips_aux.
+        DATA: edatu LIKE vbep-edatu,
+        equnr LIKE objk-equnr,
+        sernr LIKE objk-sernr,
+        serge LIKE equi-serge.
+DATA: END OF gt_lips_lif.
+
+DATA: gt_lips_ret LIKE gt_lips_lif OCCURS 0 WITH HEADER LINE.
+
+* Nachrichtenstatus
+DATA: BEGIN OF gt_nast OCCURS 0,
+        objky LIKE nast-objky,
+        datvr LIKE nast-datvr,
+      END OF gt_nast.
+
+* Kundenstamm Vertriebsdaten
+DATA: BEGIN OF gt_knvv OCCURS 0,
+        kunnr LIKE knvv-kunnr,
+        vkorg LIKE knvv-vkorg,
+        vtweg LIKE knvv-vtweg,
+        spart LIKE knvv-spart,
+        kvgr1 LIKE knvv-kvgr1,
+      END OF gt_knvv.
+
+* Serialnummern zur Meldungsposition
+DATA: BEGIN OF gt_zw51_ser OCCURS 0,
+        qmnum LIKE /cellag/zw51_ser-qmnum,
+        fenum LIKE /cellag/zw51_ser-fenum,
+        lfdnr LIKE /cellag/zw51_ser-lfdnr,
+        serge LIKE /cellag/zw51_ser-serge,
+      END OF gt_zw51_ser.
+
+* Einkaufsbelegposition
+DATA: BEGIN OF gt_ekpo_aux OCCURS 0,
+        ebeln   LIKE ekkn-ebeln,
+        ebelp   LIKE ekkn-ebelp,
+        aufnr   LIKE ekkn-aufnr,
+        lifnr   LIKE ekko-lifnr,
+        waers   LIKE ekko-waers,
+        bedat   LIKE ekko-bedat,
+        menge   LIKE ekpo-menge,
+        netwr   LIKE ekpo-netwr,
+        zzrmano LIKE ekpo-zzrmano,
+      END OF gt_ekpo_aux.
+
+DATA: BEGIN OF gt_ekpo OCCURS 0.
+        INCLUDE STRUCTURE gt_ekpo_aux.
+        DATA: sernr LIKE objk-sernr.
+DATA: END OF gt_ekpo.
+
+* Lieferantenstamm
+DATA: BEGIN OF gt_lfa1 OCCURS 0,
+        lifnr LIKE lfa1-lifnr,
+        name1 LIKE lfa1-name1,
+      END OF gt_lfa1.
+
+* Historie zum Einkaufsbeleg
+DATA: BEGIN OF gt_ekbe_aux OCCURS 0,
+        ebeln LIKE ekbe-ebeln,
+        ebelp LIKE ekbe-ebelp,
+        zekkn LIKE ekbe-zekkn,
+        vgabe LIKE ekbe-vgabe,
+        gjahr LIKE ekbe-gjahr,
+        belnr LIKE ekbe-belnr,
+        buzei LIKE ekbe-buzei,
+        budat LIKE ekbe-budat,
+        menge LIKE ekbe-menge,
+        shkzg LIKE ekbe-shkzg,
+        matnr LIKE ekbe-matnr,
+      END OF gt_ekbe_aux.
+
+* Belegkopf für Serialnummern zur Bestellposition
+DATA: BEGIN OF gt_ser08_po OCCURS 0,
+        obknr LIKE ser08-obknr,
+        ebeln LIKE ser08-ebeln,
+        ebelp LIKE ser08-ebelp,
+        sernr LIKE objk-sernr,
+      END OF gt_ser08_po.
+
+* Belegsegment Material
+DATA: BEGIN OF gt_mseg OCCURS 0,
+        mblnr LIKE mseg-mblnr,
+        zeile LIKE mseg-zeile,
+        sjahr LIKE mseg-sjahr,
+        smbln LIKE mseg-smbln,
+      END OF gt_mseg.
+
+DATA: BEGIN OF gt_ekbe OCCURS 0.
+        INCLUDE STRUCTURE gt_ekbe_aux.
+        DATA: aufnr LIKE ekkn-aufnr,
+        sernr LIKE objk-sernr.
+DATA: END OF gt_ekbe.
+
+* Lieferung-PO
+DATA: BEGIN OF gt_lips_po_aux OCCURS 0,
+        vbeln     LIKE lips-vbeln,
+        posnr     LIKE lips-posnr,
+        lfimg     LIKE lips-lfimg,
+        vgbel     LIKE lips-vgbel,
+        vgpos     LIKE lips-vgpos,
+        wadat_ist LIKE likp-wadat_ist,
+        erdat     TYPE erdat,                               "HB060216
+        obknr     LIKE ser01-obknr,
+      END OF gt_lips_po_aux.
+
+DATA: BEGIN OF gt_lips_po OCCURS 0.
+        INCLUDE STRUCTURE gt_lips_po_aux.
+        DATA: sernr LIKE objk-sernr.
+DATA: END OF gt_lips_po.
+
+* Belegkopf für Serialnummern zu Warenbewegung
+DATA: BEGIN OF gt_ser03 OCCURS 0,
+        obknr LIKE ser03-obknr,
+        mblnr LIKE ser03-mblnr,
+      END OF gt_ser03.
+
+* Objektliste Instandhaltung (PO)
+DATA: BEGIN OF gt_objk_po OCCURS 0,
+        obknr LIKE objk-obknr,
+        obzae LIKE objk-obzae,
+        sernr LIKE objk-sernr,
+        taser LIKE objk-taser,
+      END OF gt_objk_po.
+
+* Buchungskreise
+DATA: BEGIN OF gt_t001 OCCURS 0,
+        bukrs LIKE t001-bukrs,
+        waers LIKE t001-waers,
+      END OF gt_t001.
+
+* Werke/Niederlassungen
+DATA: BEGIN OF gt_t001w OCCURS 0,
+        werks LIKE t001w-werks,
+        fabkl LIKE t001w-fabkl,
+      END OF gt_t001w.
+
+* Rückmeldunq
+DATA: BEGIN OF gt_qmfe_rm OCCURS 0,
+        qmnum    LIKE qmel-qmnum,
+        aufnr    LIKE qmel-aufnr,
+        matnr    LIKE qmel-matnr,
+        objnr    LIKE qmel-objnr,
+        qmcod    LIKE qmel-qmcod,
+        serialnr LIKE qmel-serialnr,
+        kzloesch LIKE qmel-kzloesch,
+        fenum    LIKE qmfe-fenum,
+        erdat    LIKE qmfe-erdat,
+        fetxt    LIKE qmfe-fetxt,
+        fegrp    LIKE qmfe-fegrp,
+        fecod    LIKE qmfe-fecod,
+        otgrp    LIKE qmfe-otgrp,
+        oteil    LIKE qmfe-oteil,
+        besz     LIKE qmfe-besz,
+        kzmla    TYPE kzmla,
+      END OF gt_qmfe_rm.
+
+DATA: gt_qmfe_rm_qmnum LIKE gt_qmfe_rm OCCURS 0 WITH HEADER LINE.
+
+* Qualitaetsmeldung - Aktionen
+DATA: BEGIN OF gt_qmma_aux OCCURS 0,
+        qmnum  LIKE qmma-qmnum,
+        manum  LIKE qmma-manum,
+        fenum  LIKE qmma-fenum,
+        mngrp  LIKE qmma-mngrp,
+        mncod  LIKE qmma-mncod,
+        matxt  LIKE qmma-matxt,
+        ernam  LIKE qmma-ernam,
+        erdat  LIKE qmma-erdat,
+        aenam  LIKE qmma-aenam,
+        aedat  LIKE qmma-aedat,
+        peter  LIKE qmma-peter,
+        indtx  LIKE qmma-indtx,
+        kzmla  TYPE kzmla,    "HB291123 Sprache Text
+        erzeit LIKE qmma-erzeit,
+        aezeit LIKE qmma-aezeit,
+        qmanum LIKE qmma-qmanum,
+      END OF gt_qmma_aux.
+
+DATA: BEGIN OF gt_qmma OCCURS 0.
+        INCLUDE STRUCTURE gt_qmma_aux.
+        DATA: line(255),
+        tdluser   TYPE tdluser,  "Änderungsfelder aus Langtext  01.02.2023
+        tdldate   TYPE tdldate,
+        tdltime   TYPE tdltime.
+DATA: END OF gt_qmma.
+
+DATA: BEGIN OF gt_qmma_gsi OCCURS 0,
+        qmnum    LIKE qmma-qmnum,
+        manum    LIKE qmma-manum,
+        mngrp    LIKE qmma-mngrp,
+        mncod    LIKE qmma-mncod,
+        kzloesch LIKE qmma-kzloesch,
+      END OF gt_qmma_gsi.
+
+* Qualitaetsmeldung - Ursachen
+DATA: BEGIN OF gt_qmur OCCURS 0,
+        qmnum LIKE qmur-qmnum,
+        erdat LIKE qmur-erdat,
+        aedat LIKE qmur-aedat,
+        urgrp LIKE qmur-urgrp,
+        urcod LIKE qmur-urcod,
+      END OF gt_qmur.
+
+* Materialnummer
+DATA: BEGIN OF gt_matnr OCCURS 0,
+        matnr LIKE mara-matnr,
+      END OF gt_matnr.
+
+* Lieferantnummer
+DATA: BEGIN OF gt_lifnr OCCURS 0,
+        lifnr LIKE lfa1-lifnr,
+      END OF gt_lifnr.
+
+* Belegkopf Materialbeleg
+DATA: gt_mkpf TYPE tyt_mkpf_s.                              "HB031018
+
+* Einkaufsgruppen
+DATA: BEGIN OF gt_t024 OCCURS 0,
+        ekgrp LIKE t024-ekgrp,
+        eknam LIKE t024-eknam,
+      END OF gt_t024.
+
+* Belegsegment Material
+DATA: BEGIN OF gt_mseg_aussond OCCURS 0,
+        mblnr LIKE mseg-mblnr,
+        mjahr LIKE mseg-mjahr,
+        zeile LIKE mseg-zeile,
+        bwart LIKE mseg-bwart,
+        charg LIKE mseg-charg,
+      END OF gt_mseg_aussond.
+
+* Price
+DATA: gt_a501 LIKE a501 OCCURS 0 WITH HEADER LINE,
+      gt_a502 LIKE a502 OCCURS 0 WITH HEADER LINE,
+      gt_a503 LIKE a503 OCCURS 0 WITH HEADER LINE,
+      gt_a504 LIKE a504 OCCURS 0 WITH HEADER LINE.
+
+DATA: BEGIN OF gt_konp OCCURS 0,
+        knumh LIKE konp-knumh,
+        kbetr LIKE konp-kbetr,
+      END OF gt_konp.
+
+DATA: gt_return_tab LIKE ddshretval OCCURS 0 WITH HEADER LINE.
+
+DATA: BEGIN OF gt_orderview OCCURS 0.
+        INCLUDE STRUCTURE /cellag/ordview.
+        DATA: flag_vbep,
+        flag_lif,
+        flag_ekpo,
+        flag_qmferm,
+        abgru_ret   TYPE abgru_va,                          "HB121213
+        abgru_aedat TYPE aedat.                             "HB161213
+DATA: END OF gt_orderview.
+
+DATA: gt_orderview_changed TYPE HASHED TABLE OF /cellag/ordview WITH UNIQUE KEY qmnum fenum counter,
+      gwa_orderview        LIKE /cellag/ordview.
+
+DATA: gwa_orderview_old LIKE /cellag/ordview,
+      gwa_orderview_new LIKE /cellag/ordview.
+
+DATA: gt_orderview_add LIKE /cellag/ord_add OCCURS 0 WITH HEADER LINE.
+
+DATA: gv_custom_container TYPE REF TO cl_gui_custom_container,
+      gv_grid             TYPE REF TO cl_gui_alv_grid.
+
+DATA: gwa_layout      TYPE lvc_s_layo,
+      gt_fieldcat     TYPE lvc_t_fcat,
+      gwa_fieldcat    TYPE lvc_s_fcat,
+      gwa_cell_colour TYPE lvc_s_scol.
+
+DATA: gv_ok_code TYPE syucomm.
+
+DATA: gv_index_from TYPE syindex,
+      gv_index_to   TYPE syindex.
+
+DATA: gv_is_repdau_old TYPE abap_bool,   "HB100613 temp für Workaround
+      gv_sortcrit      TYPE string.
+
+DATA: gt_zordview_cust1   TYPE HASHED TABLE OF zordview_cust1 WITH UNIQUE KEY wktnr,
+      gt_zordview_cutofft TYPE HASHED TABLE OF zordview_cutofft WITH UNIQUE KEY wktnr,
+*      gt_zordview_clos_ex TYPE HASHED TABLE OF zordview_clos_ex WITH UNIQUE KEY qmnum fenum, "HB010518
+      gt_qwrnum           TYPE tyt_qwrnum,                  "HB150819
+      gt_zordview_prctr   TYPE HASHED TABLE OF zordview_prctr WITH UNIQUE KEY otgrp, "HB081018
+      gt_nomat            TYPE tyt_nomat,                   "HB230224
+
+      gt_liefpos          TYPE tyt_liefpos,                 "HB180915
+      gv_10days_back      TYPE dats.                        "HB280616 Archivprüfung
+
+
+CONSTANTS: c_max_lines_table TYPE sytabix VALUE 9000,
+           c_max_lines_range TYPE sytabix VALUE 3000,
+           c_true            VALUE 'X',
+           c_deleted         VALUE 'D',
+           c_open            VALUE 'O',
+           c_closed          VALUE 'C',
+           c_new             VALUE 'N'.
+* MODIFY /cellag/ordview TEMP BUFFER {NTA140401
+DATA: gt_orderview_mod LIKE /cellag/ordview OCCURS 0 WITH HEADER LINE.
+* }NTA140401
+
+"Protokoll sammeln
+DATA: gt_string TYPE STANDARD TABLE OF string.
+
+"Berechtigung: Prüfung auf Vorhandensein im Archiv Performance!
+DATA: gv_auth_check_arch TYPE abap_bool.
+
+
+CONSTANTS:
+  co_einlagerdate   TYPE dats VALUE '20991201', "1511-375  Erweiterung Orderview auf PA1 - Einlagerung
+  co_xsitd_transmed TYPE xsitd VALUE 'TRANSMED'.  "2009-878  Orderview FETCH -Trackingnummer Deutsche Bahn

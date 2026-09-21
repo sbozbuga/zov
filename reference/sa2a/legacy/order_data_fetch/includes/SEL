@@ -1,0 +1,34 @@
+*&---------------------------------------------------------------------*
+*&  Include           /CELLAG/ORDER_DATA_FETCH_SEL
+*&---------------------------------------------------------------------*
+
+SELECTION-SCREEN: BEGIN OF BLOCK block1 WITH FRAME TITLE TEXT-t01.
+PARAMETERS: pa_old AS CHECKBOX USER-COMMAND old.
+SELECT-OPTIONS: s_odate FOR /cellag/ordview-orderdate MODIF ID old,
+                s_statc FOR /cellag/ordview-orderstatecompl MODIF ID old,
+                s_qmnu2 FOR /cellag/ordview-qmnum MODIF ID old,
+                s_otgr2 FOR /cellag/ordview-otgrp MODIF ID old,
+                s_wktnr FOR /cellag/ordview-wktnr MODIF ID old,
+                s_kdgrp FOR /cellag/ordview-customergroup MODIF ID old,
+                s_fkstk FOR /cellag/ordview-fkstk MODIF ID old.
+SELECTION-SCREEN: END OF BLOCK block1.
+
+SELECTION-SCREEN: BEGIN OF BLOCK block2 WITH FRAME TITLE TEXT-t02.
+PARAMETERS: pa_new AS CHECKBOX USER-COMMAND new.
+SELECT-OPTIONS: s_qmnum FOR qmel-qmnum MODIF ID new,
+                s_otgrp FOR qmfe-otgrp MODIF ID new,
+                s_erdat FOR qmfe-erdat MODIF ID new,
+                s_parnr FOR ihpa-parnr NO INTERVALS  MODIF ID new.
+SELECTION-SCREEN: END OF BLOCK block2.
+
+
+SELECTION-SCREEN: BEGIN OF BLOCK block3 WITH FRAME TITLE TEXT-t03.
+PARAMETERS: pa_test  AS CHECKBOX DEFAULT c_true,
+            p_selwr  AS CHECKBOX,                "Selektionen ausgeben; Anzahlen bestimmen
+            p_protdt AS CHECKBOX,                "Detailprotokoll nach Änderungen einzelner Ermittlungen
+            p_orddt0 AS CHECKBOX,                "Auftragsdatum 0 mitselektieren
+            p_ctarch AS CHECKBOX,                "Gesamtzahl Archivkennzeichen Datei  (Dauer PA1 < 25; 2 Selektionen
+            p_chkarc AS CHECKBOX DEFAULT c_true, "Prüfung ob Meldungen bereits im Archiv; Performance
+            p_refdat type dats default sy-datum.
+"bei TÄGLICH deaktivieren; Berechtigung fix NHS060015 und NHS050248
+SELECTION-SCREEN: END OF BLOCK block3.

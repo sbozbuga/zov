@@ -1,0 +1,588 @@
+*&---------------------------------------------------------------------*
+*&  Include           /CELLAG/ORDER_DATA_FETCH_F01
+*   Routinen ab August 2014 / Herm
+*   Meist Erweiterungen nur über "Rucksäcke" am Ende, da Originalcode
+*   nicht erweiterbar/wartbar
+*&---------------------------------------------------------------------*
+*&---------------------------------------------------------------------*
+*&      Form  WE_VENDOR_UPOS
+*&---------------------------------------------------------------------*
+*       1408-037 Unterpositionen in Vendorbestellung (s.a. Doku zu YLE01)
+*       Falls vendorrueck leer bei Vendorbestellung: Prüfen ob es
+*       Unterpos gibt; dazu Datum über Bestellentwicklung Upos
+*----------------------------------------------------------------------*
+FORM we_vendor_upos .
+
+  TYPES:
+    BEGIN OF tys_ekpo_uebpo,
+      ebeln TYPE ebeln,
+      ebelp TYPE ebelp,
+      uebpo TYPE uebpo,
+    END OF tys_ekpo_uebpo,
+    tyt_ekpo_uebpo TYPE HASHED TABLE OF tys_ekpo_uebpo
+                                     WITH UNIQUE KEY ebeln
+                                                     ebelp,
+    BEGIN OF tys_ekbe,
+      ebeln TYPE ebeln,
+      ebelp TYPE ebelp,
+      vgabe TYPE vgabe,
+      budat TYPE budat,
+    END OF tys_ekbe,
+    tyt_ekbe   TYPE STANDARD TABLE OF tys_ekbe,
+    tyt_ekbe_h TYPE HASHED TABLE OF tys_ekbe
+                         WITH UNIQUE KEY ebeln
+                                         ebelp,
+
+    BEGIN OF tys_ekko,
+      ebeln TYPE ebeln,
+    END OF tys_ekko,
+    tyt_ekko TYPE STANDARD TABLE OF tys_ekko.
+
+  DATA: lv_count        TYPE i,
+        lt_ekko         TYPE tyt_ekko,
+        lt_ekpo_uebpo   TYPE tyt_ekpo_uebpo,
+        lt_ekbe         TYPE tyt_ekbe,
+        lt_ekbe_h       TYPE tyt_ekbe_h,
+        lt_ekbe_h_uebpo TYPE tyt_ekbe_h.
+
+  FIELD-SYMBOLS:
+    <ls_ekpo>  TYPE tys_ekpo_uebpo,
+    <ls_ekbe>  TYPE tys_ekbe,
+    <ls_order> LIKE LINE OF gt_orderview,
+    <ls_ekko>  TYPE tys_ekko.
+
+
+  "Vendorvorgänge ohne Vendorrückmeldung bestimmen
+  LOOP AT gt_orderview WHERE purchasenumber > space
+                         AND vendorrueck    = '00000000'.
+    INSERT INITIAL LINE INTO TABLE lt_ekko ASSIGNING <ls_ekko>.
+    <ls_ekko>-ebeln = gt_orderview-purchasenumber.
+  ENDLOOP.
+
+  CHECK NOT lt_ekko[] IS INITIAL.
+
+  "Selektion Unterpositionen
+  SELECT ebeln
+         ebelp
+         uebpo
+    FROM ekpo
+    INTO TABLE lt_ekpo_uebpo
+    FOR ALL ENTRIES IN lt_ekko
+    WHERE ebeln =  lt_ekko-ebeln
+      AND loekz <> 'L'               "HB310817 1707-609
+      AND uebpo >  space.
+
+  CHECK NOT lt_ekpo_uebpo[] IS INITIAL.
+
+  "Bestellentwicklung WE zu Unterpos suchen
+  SELECT ebeln
+         ebelp
+         vgabe
+         budat
+    FROM ekbe
+    INTO TABLE lt_ekbe
+    FOR ALL ENTRIES IN lt_ekpo_uebpo
+    WHERE ebeln = lt_ekpo_uebpo-ebeln
+      AND ebelp = lt_ekpo_uebpo-ebelp
+      AND ( vgabe = '1' AND bwart = '101' ).         "Wareneingang
+
+  SORT lt_ekbe    BY ebeln ASCENDING
+                     ebelp ASCENDING
+                     vgabe ASCENDING
+                     budat DESCENDING.
+  DELETE ADJACENT DUPLICATES FROM lt_ekbe COMPARING ebeln
+                                                    ebelp
+                                                    vgabe.
+
+  "Austausch ebelp Unterpos durch Hauptpos
+  LOOP AT lt_ekbe ASSIGNING <ls_ekbe>.
+    READ TABLE lt_ekpo_uebpo ASSIGNING <ls_ekpo> WITH TABLE KEY ebeln = <ls_ekbe>-ebeln
+                                                                ebelp = <ls_ekbe>-ebelp.
+    IF sy-subrc = 0.
+      <ls_ekbe>-ebelp = <ls_ekpo>-uebpo.
+    ENDIF.
+  ENDLOOP.
+
+  SORT lt_ekbe    BY ebeln ASCENDING
+                     ebelp ASCENDING
+                     vgabe ASCENDING
+                     budat DESCENDING.
+  DELETE ADJACENT DUPLICATES FROM lt_ekbe COMPARING ebeln
+                                                    ebelp
+                                                    vgabe.
+
+  lt_ekbe_h_uebpo[] = lt_ekbe[].
+
+  "jetzt vendorrueck Datum zuordnen
+  LOOP AT gt_orderview ASSIGNING <ls_order>
+                       WHERE purchasenumber > space
+                         AND vendorrueck    = '00000000'.
+
+    READ TABLE lt_ekbe_h_uebpo ASSIGNING <ls_ekbe>
+         WITH TABLE KEY ebeln = <ls_order>-purchasenumber
+                        ebelp = <ls_order>-ebelp.
+    IF sy-subrc = 0.
+      ADD 1 TO lv_count.
+      <ls_order>-vendorrueck = <ls_ekbe>-budat.
+    ENDIF.
+  ENDLOOP.
+
+  PERFORM prot_line USING lv_count 'Datum Vendorrueck Unterpos. Anzahl            :'.
+
+ENDFORM.                    " WE_VENDOR_UPOS
+
+*&---------------------------------------------------------------------*
+*&      Form  VENDOR_AUFTRAGSBEZOGEN
+*&---------------------------------------------------------------------*
+*       Vendor mit Kontierungstyp E Auftrag
+*       analog YLE01; Kontierungstyp E Vendor auf EKKN
+*       s.a. method select_data_vendor.
+*----------------------------------------------------------------------*
+FORM vendor_auftragsbezogen .
+
+
+  TYPES:
+    BEGIN OF tys_ekpo,
+      ebeln TYPE ebeln,
+      ebelp TYPE ebelp,
+    END OF tys_ekpo,
+    tyt_ekpo TYPE STANDARD TABLE OF tys_ekpo,
+
+    BEGIN OF tys_lips_ve,
+      aufnr TYPE aufnr,
+      ebeln TYPE ebeln,
+      ebelp TYPE ebelp,
+      lifnr TYPE lifnr,
+      bedat TYPE bedat,
+      name1 TYPE name1_gp,
+    END OF tys_lips_ve,
+    tyt_lips_ve TYPE STANDARD TABLE OF tys_lips_ve,
+
+    BEGIN OF tys_lips_ve2,                                  "HB260317
+      vbeln   TYPE vbeln_co,
+      vbelp   TYPE posnr_co,
+      ebeln   TYPE ebeln,
+      ebelp   TYPE ebelp,
+      lifnr   TYPE lifnr,
+      bedat   TYPE bedat,
+      name1   TYPE name1_gp,
+      zzrmano TYPE zzrmano,
+    END OF tys_lips_ve2,
+    tyt_lips_ve2   TYPE STANDARD TABLE OF tys_lips_ve2,
+    tyt_lips_ve2_h TYPE HASHED TABLE OF tys_lips_ve2
+                          WITH UNIQUE KEY vbeln vbelp,
+
+    BEGIN OF tys_liefvend,    "Bestimmung Trackingnr Lieferung Vendor
+      vbeln TYPE vbeln,
+      posnr TYPE posnr,                                     "HB120914
+    END OF tys_liefvend,
+    tyt_liefvend TYPE STANDARD TABLE OF tys_liefvend,
+
+    BEGIN OF tys_lips_ret,
+      vbeln     TYPE vbeln_vl,
+      posnr     TYPE posnr_vl,
+      matnr     TYPE matnr,
+      erdat     TYPE erdat,
+      wadat_ist TYPE wadat_ist,
+      bldat     TYPE bldat,
+    END OF tys_lips_ret,
+    tyt_lips_ret TYPE HASHED TABLE OF tys_lips_ret
+                         WITH UNIQUE KEY vbeln
+                                          posnr,
+    BEGIN OF tys_ekpo_uebpo,
+      ebeln TYPE ebeln,
+      ebelp TYPE ebelp,
+      uebpo TYPE uebpo,
+    END OF tys_ekpo_uebpo,
+    tyt_ekpo_uebpo TYPE HASHED TABLE OF tys_ekpo_uebpo
+                                     WITH UNIQUE KEY ebeln
+                                                     ebelp,
+
+    BEGIN OF tys_vbuk,                                      "HB130316
+      vbeln TYPE vbeln,
+      wbstk TYPE wbstk,
+    END OF tys_vbuk,
+    tyt_vbuk TYPE HASHED TABLE OF tys_vbuk WITH UNIQUE KEY vbeln,
+
+    BEGIN OF tys_ekbe,
+      ebeln TYPE ebeln,
+      ebelp TYPE ebelp,
+      vgabe TYPE vgabe,
+      belnr TYPE mblnr,
+      buzei TYPE mblpo,
+      budat TYPE budat,
+    END OF tys_ekbe,
+    tyt_ekbe   TYPE STANDARD TABLE OF tys_ekbe,
+    tyt_ekbe_h TYPE HASHED TABLE OF tys_ekbe
+                         WITH UNIQUE KEY ebeln
+                                         ebelp
+                                         vgabe,
+    BEGIN OF tys_ekkn,
+      ebeln TYPE ebeln,
+      ebelp TYPE ebelp,
+      zekkn TYPE dzekkn,
+      vbeln TYPE vbeln_co,
+      vbelp TYPE posnr_co,
+    END OF tys_ekkn,
+    tyt_ekkn   TYPE STANDARD TABLE OF tys_ekkn,
+    tyt_ekkn_h TYPE HASHED TABLE OF tys_ekkn
+                         WITH UNIQUE KEY vbeln
+                                         vbelp.
+  DATA:
+    lt_lips_ve2     TYPE tyt_lips_ve2,
+    lt_lips_ve2_h   TYPE tyt_lips_ve2_h,
+    lt_ekpo         TYPE tyt_ekpo,
+    lt_lips_ve_upos TYPE tyt_lips_ve,
+    lt_liefvend     TYPE tyt_liefvend,
+    lt_ekpo_uebpo   TYPE tyt_ekpo_uebpo,
+    lt_lips_lief    TYPE tyt_lips_ret,
+    lt_lips_lief2   TYPE tyt_lips_ret,
+    lt_vbuk         TYPE tyt_vbuk,
+    lt_ekbe         TYPE tyt_ekbe,
+    lt_ekbe_h       TYPE tyt_ekbe_h,
+    lt_ekbe_h_uebpo TYPE tyt_ekbe_h,
+    lt_ekkn         TYPE tyt_ekkn,
+    lt_ekkn_h       TYPE tyt_ekkn_h,
+    lt_vbap         TYPE STANDARD TABLE OF tys_vbap,
+
+    lv_found_ve     TYPE abap_bool,
+    lv_count        TYPE i.
+
+
+  FIELD-SYMBOLS:
+    <ls_orderview>    LIKE LINE OF gt_orderview,
+    <ls_lips_ve2>     TYPE tys_lips_ve2,
+    <ls_lips_lief>    TYPE tys_lips_ret,
+    <ls_liefvend>     TYPE tys_liefvend,
+    <ls_vbuk>         TYPE tys_vbuk,
+    <ls_ekpo>         TYPE tys_ekpo,
+    <ls_ekpo_uebpo>   TYPE tys_ekpo_uebpo,
+    <ls_ekbe>         TYPE tys_ekbe,
+    <ls_lips_ve_upos> TYPE tys_lips_ve,
+    <ls_vbap>         TYPE tys_vbap,
+    <ls_ekkn>         TYPE tys_ekkn.
+
+  "-------------------------------------------------------
+  " Vendordaten mit Kontierung auf Auftrag beschaffen
+  " Kontierungstyp E = Kundeneinzel
+  "-------------------------------------------------------
+  CHECK NOT gt_vbap[] IS INITIAL.
+
+  lv_count = lines( gt_vbap ).
+
+  PERFORM prot_line USING lv_count '  vor EKKN. gt_vbap. Anzahl                   :'.
+
+  "Selektion erfordert viel Zeit - tw ca. 1 h PA1
+  "EKKN mit VBELN: Anz QA1 10.000, Anz PA1: 7.700, also relativ wenige - kompl. Tabelle lesen
+  "-------------------------------------------------------
+  "manuelle Vorselektion und Abgleich mit Vertriebsbelegen
+  "-------------------------------------------------------
+
+  SELECT ebeln
+         ebelp
+         zekkn
+         vbeln
+         vbelp
+    FROM ekkn
+    INTO TABLE lt_ekkn
+    WHERE vbeln > space.
+  IF NOT lt_ekkn[] IS INITIAL.
+    SORT lt_ekkn BY vbeln vbelp.
+    DELETE ADJACENT DUPLICATES FROM lt_ekkn COMPARING vbeln vbelp.
+    lt_ekkn_h[] = lt_ekkn[].
+
+    lt_vbap[] = gt_vbap[].
+    LOOP AT lt_vbap ASSIGNING <ls_vbap>.
+      READ TABLE lt_ekkn_h ASSIGNING <ls_ekkn> WITH TABLE KEY vbeln = <ls_vbap>-vbeln
+                                                              vbelp = <ls_vbap>-posnr.
+      IF sy-subrc <> 0.
+        DELETE lt_vbap.
+      ENDIF.
+    ENDLOOP.
+
+    lv_count = lines( lt_vbap ).
+    PERFORM prot_line USING lv_count '  vor EKKN. lt_vbap. Anzahl                   :'.
+  ENDIF.
+
+  CHECK NOT lt_vbap[] IS INITIAL.
+
+  SELECT a~vbeln
+         a~vbelp
+         a~ebeln
+         a~ebelp
+         b~lifnr
+         b~bedat
+         d~name1
+         c~zzrmano
+    FROM ekkn AS a
+      INNER JOIN ekko AS b
+        ON a~ebeln = b~ebeln
+      INNER JOIN ekpo AS c
+        ON a~ebeln = c~ebeln AND
+           a~ebelp = c~ebelp
+      INNER JOIN lfa1 AS d
+        ON b~lifnr = d~lifnr
+    INTO TABLE lt_lips_ve2
+    FOR ALL ENTRIES IN lt_vbap
+    WHERE a~vbeln = lt_vbap-vbeln
+      AND a~vbelp = lt_vbap-posnr     "es gibt nur 1 Index auf VBELN; sonst ggf. Full table scan EKKN HBE 2501-751
+      AND c~loekz <> 'L'               "HB310817 1707-609
+      AND c~uebpo = space.
+
+  IF NOT lt_lips_ve2[] IS INITIAL.
+    SORT lt_lips_ve2 BY vbeln ASCENDING
+                        vbelp ASCENDING
+                        ebeln DESCENDING.
+    DELETE ADJACENT DUPLICATES FROM lt_lips_ve2 COMPARING vbeln vbelp.
+    lv_count = lines( lt_lips_ve2 ).
+    lt_lips_ve2_h[] = lt_lips_ve2[].
+    CLEAR: lt_lips_ve2[].
+
+    PERFORM prot_line USING lv_count '  nach EKKN. lt_lips_ve2. Anzahl               :'.
+
+
+    "neue Zeilen anhängen an lt_lips_ve wegen Suche
+    LOOP AT lt_lips_ve2_h ASSIGNING <ls_lips_ve2>.
+      INSERT INITIAL LINE INTO TABLE lt_ekpo ASSIGNING <ls_ekpo>.
+      <ls_ekpo>-ebeln = <ls_lips_ve2>-ebeln.
+      <ls_ekpo>-ebelp = <ls_lips_ve2>-ebelp.
+    ENDLOOP.
+  ENDIF.
+
+  CHECK NOT lt_ekpo[] IS INITIAL.
+
+  "Auch Unterpositionen selektieren und dazufügen
+  SELECT ebeln
+         ebelp
+    FROM ekpo
+    INTO CORRESPONDING FIELDS OF TABLE lt_lips_ve_upos
+    FOR ALL ENTRIES IN lt_ekpo
+    WHERE ebeln = lt_ekpo-ebeln
+      AND uebpo = lt_ekpo-ebelp.
+
+  "neue Zeilen anhängen an lt_lips_ve wegen Suche
+  LOOP AT lt_lips_ve_upos ASSIGNING <ls_lips_ve_upos>.
+    INSERT INITIAL LINE INTO TABLE lt_ekpo ASSIGNING <ls_ekpo>.
+    <ls_ekpo>-ebeln = <ls_lips_ve_upos>-ebeln.
+    <ls_ekpo>-ebelp = <ls_lips_ve_upos>-ebelp.
+  ENDLOOP.
+
+*              uebpo = lt_lips_ve-ebelp )                    "Unterposition
+
+  "1: Wareneingang zum Vendor aus Bestellentwicklung; 8: Lieferung
+  SELECT ebeln
+         ebelp
+         vgabe
+         belnr                                              "8: EBELN
+         buzei                                              "8: EBELP
+         budat
+    FROM ekbe
+    INTO TABLE lt_ekbe
+    FOR ALL ENTRIES IN lt_ekpo
+    WHERE ebeln = lt_ekpo-ebeln
+      AND ebelp = lt_ekpo-ebelp
+      AND ( ( vgabe = '1' AND bwart = '101' ) OR          "Wareneingang
+            ( vgabe = '8') ).                             "Lieferung
+
+
+  SORT lt_ekbe    BY ebeln ASCENDING
+                     ebelp ASCENDING
+                     vgabe ASCENDING
+                     budat DESCENDING.
+  DELETE ADJACENT DUPLICATES FROM lt_ekbe COMPARING ebeln
+                                                    ebelp
+                                                    vgabe.
+  lt_ekbe_h[] = lt_ekbe[].
+
+  "Vorbereiten Suche nach Vendorlieferung/Trackingnr
+  LOOP AT lt_ekbe ASSIGNING <ls_ekbe> WHERE vgabe = '8'.
+    INSERT INITIAL LINE INTO TABLE lt_liefvend ASSIGNING <ls_liefvend>.
+    <ls_liefvend>-vbeln = <ls_ekbe>-belnr.
+    <ls_liefvend>-posnr = <ls_ekbe>-buzei.                  "HB120914
+  ENDLOOP.
+  CLEAR: lt_ekbe[].
+
+  "Warenausgang zur Vendorlieferung    "HB120914
+  IF NOT lt_liefvend[] IS INITIAL.
+    SELECT a~vbeln
+           a~posnr
+           a~matnr
+           a~erdat                      "MK 030216 Ticket 1601-819
+           b~wadat_ist
+      FROM lips AS a
+        INNER JOIN likp AS b
+          ON a~vbeln = b~vbeln
+      INTO TABLE lt_lips_lief
+      FOR ALL ENTRIES IN lt_liefvend
+      WHERE a~vbeln = lt_liefvend-vbeln
+        AND a~posnr = lt_liefvend-posnr.
+
+    "Status Kopf VBUK-WBSTK             "HB130316
+    IF NOT lt_lips_lief[] IS INITIAL.
+      lt_lips_lief2[] = lt_lips_lief[].
+      SORT lt_lips_lief2 BY vbeln.
+      DELETE ADJACENT DUPLICATES FROM lt_lips_lief2 COMPARING vbeln.
+
+* Quick Fix Replace VBUK table access with access of table LIKP
+* Transport SA2K902251 MKU20260331 RM S4HANA Custom Code 2.1 ADOPT 2508-614
+* Replaced Code:
+*      SELECT vbeln
+*             wbstk
+*        FROM vbuk
+*        INTO TABLE lt_vbuk
+*        FOR ALL ENTRIES IN lt_lips_lief
+*        WHERE vbeln = lt_lips_lief-vbeln.
+      SELECT vbeln
+             wbstk
+        FROM LIKP
+        INTO TABLE lt_vbuk
+        FOR ALL ENTRIES IN lt_lips_lief
+        WHERE vbeln = lt_lips_lief-vbeln.
+* End of Quick Fix
+
+    ENDIF.
+
+  ENDIF.
+
+  "Wareneingang zur Unterposition                       HB010814
+
+  "Selektion Unterpositionen
+  SELECT ebeln
+         ebelp
+         uebpo
+    FROM ekpo
+    INTO TABLE lt_ekpo_uebpo
+    FOR ALL ENTRIES IN lt_lips_ve2_h
+    WHERE ebeln = lt_lips_ve2_h-ebeln
+      AND loekz <> 'L'               "HB310817 1707-609
+      AND uebpo > space.
+
+  CHECK NOT lt_ekpo_uebpo[] IS INITIAL.
+
+  "Bestellentwicklung WE zu Unterpos suchen
+  SELECT ebeln
+         ebelp
+         vgabe
+         belnr                                              "8: EBELN
+         buzei                                              "8: EBELP
+         budat
+    FROM ekbe
+    INTO TABLE lt_ekbe
+    FOR ALL ENTRIES IN lt_ekpo_uebpo
+    WHERE ebeln = lt_ekpo_uebpo-ebeln
+      AND ebelp = lt_ekpo_uebpo-ebelp
+      AND ( ( vgabe = '1' AND bwart = '101' ) OR          "Wareneingang
+            ( vgabe = '8') ).            "Lieferung
+
+  SORT lt_ekbe    BY ebeln ASCENDING
+                     ebelp ASCENDING
+                     vgabe ASCENDING
+                     budat DESCENDING.
+  DELETE ADJACENT DUPLICATES FROM lt_ekbe COMPARING ebeln
+                                                    ebelp
+                                                    vgabe.
+
+  LOOP AT lt_ekbe ASSIGNING <ls_ekbe>.
+    READ TABLE lt_ekpo_uebpo ASSIGNING <ls_ekpo_uebpo> WITH TABLE KEY ebeln = <ls_ekbe>-ebeln
+                                                                      ebelp = <ls_ekbe>-ebelp.
+    IF sy-subrc = 0.
+      <ls_ekbe>-ebelp = <ls_ekpo_uebpo>-uebpo.
+    ENDIF.
+  ENDLOOP.
+
+  SORT lt_ekbe    BY ebeln ASCENDING
+                     ebelp ASCENDING
+                     vgabe ASCENDING
+                     budat DESCENDING.
+  DELETE ADJACENT DUPLICATES FROM lt_ekbe COMPARING ebeln
+                                                    ebelp
+                                                    vgabe.
+
+  lt_ekbe_h_uebpo[] = lt_ekbe[].
+  CLEAR: lt_ekbe[], lt_ekpo_uebpo[].
+
+
+  "-------------------------------------------------------
+  " Einmischung in Orderview
+  "-------------------------------------------------------
+
+  LOOP AT gt_orderview ASSIGNING <ls_orderview> WHERE purchasenumber = space.
+
+    READ TABLE lt_lips_ve2_h ASSIGNING <ls_lips_ve2> WITH TABLE KEY vbeln = <ls_orderview>-vbeln
+                                                                    vbelp = <ls_orderview>-posnr.
+    IF sy-subrc = 0.
+      "Bestellung kontiert auf Kundenauftrag  E
+      <ls_orderview>-purchasenumber = <ls_lips_ve2>-ebeln.
+      <ls_orderview>-ebelp          = <ls_lips_ve2>-ebelp.
+      <ls_orderview>-vendornummer   = <ls_lips_ve2>-lifnr.
+      <ls_orderview>-vendor         = <ls_lips_ve2>-name1.
+      <ls_orderview>-vendordate     = <ls_lips_ve2>-bedat.
+      <ls_orderview>-zyrmano        = <ls_lips_ve2>-zzrmano. "HB110517
+
+      "Wareneingang Vendor
+      READ TABLE lt_ekbe_h ASSIGNING <ls_ekbe> WITH TABLE KEY ebeln = <ls_orderview>-purchasenumber
+                                                              ebelp = <ls_orderview>-ebelp
+                                                              vgabe = '1'.
+      IF sy-subrc = 0.
+        <ls_orderview>-vendorrueck     = <ls_ekbe>-budat.
+      ELSE.
+        "WE über Unterposition?                   HB010814
+        READ TABLE lt_ekbe_h_uebpo ASSIGNING <ls_ekbe> WITH TABLE KEY ebeln = <ls_orderview>-purchasenumber
+                                                                      ebelp = <ls_orderview>-ebelp
+                                                                      vgabe = '1'.
+        IF sy-subrc = 0.
+          <ls_orderview>-vendorrueck     = <ls_ekbe>-budat.
+        ENDIF.
+      ENDIF.
+
+      "Lieferung Vendor
+      lv_found_ve = abap_false.
+      READ TABLE lt_ekbe_h ASSIGNING <ls_ekbe> WITH TABLE KEY ebeln = <ls_orderview>-purchasenumber
+                                                              ebelp = <ls_orderview>-ebelp
+                                                              vgabe = '8'.
+      IF sy-subrc = 0.
+        <ls_orderview>-yliefvend     = <ls_ekbe>-belnr.
+        <ls_orderview>-yliefvendpos  = <ls_ekbe>-buzei.
+        lv_found_ve = abap_true.
+      ELSE.
+        "Lieferung über Unterposition?
+        READ TABLE lt_ekbe_h_uebpo ASSIGNING <ls_ekbe> WITH TABLE KEY ebeln = <ls_orderview>-purchasenumber
+                                                                      ebelp = <ls_orderview>-ebelp
+                                                                      vgabe = '8'.
+        IF sy-subrc = 0.
+          <ls_orderview>-yliefvend     = <ls_ekbe>-belnr.
+          <ls_orderview>-yliefvendpos  = <ls_ekbe>-buzei.
+          lv_found_ve = abap_true.
+        ENDIF.
+      ENDIF.
+      IF lv_found_ve = abap_true.
+
+        "WA zur Vendorlieferung    HB120914
+        READ TABLE lt_lips_lief ASSIGNING <ls_lips_lief> WITH TABLE KEY vbeln = <ls_orderview>-yliefvend
+                                                                        posnr = <ls_orderview>-yliefvendpos.
+        IF sy-subrc = 0.
+          <ls_orderview>-yliefvendvdat    = <ls_lips_lief>-erdat.
+          READ TABLE lt_vbuk ASSIGNING <ls_vbuk> WITH TABLE KEY vbeln = <ls_lips_lief>-vbeln.
+          IF sy-subrc = 0.
+            "1603-224 Unschärfe in YLE01 auf PA1 - Warenausgang Vendorlieferung
+            "laut Marius VBUK-WBSTK abfragen
+            IF <ls_vbuk>-wbstk = 'C'.
+              <ls_orderview>-yliefvendvdat    = <ls_lips_lief>-wadat_ist.
+            ENDIF.
+          ENDIF.
+        ENDIF.
+
+*        "Trackingdaten - AWB-Nummer Vendorlieferung
+*        IF NOT p_tracki IS INITIAL.
+*          READ TABLE lt_vttp_ve ASSIGNING <ls_vttp> WITH TABLE KEY vbeln = <ls_ekbe>-belnr.
+*          IF sy-subrc = 0.
+*            <ls_orderview>-awb_vend    = <ls_vttp>-trackn.
+*          ENDIF.
+*        ENDIF.
+      ENDIF.  "READ TABLE lt_ekbe_h
+    ENDIF. "lv_found_ve = abap_true.
+  ENDLOOP.
+
+  PERFORM prot_line USING lv_count 'Datum Vendor_auftragsbezogen EKKN. Anzahl     :'.
+
+ENDFORM.                    " VENDOR_AUFTRAGSBEZOGEN

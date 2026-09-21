@@ -1,0 +1,104 @@
+*&---------------------------------------------------------------------*
+*&  Include           /CELLAG/ORDERVIEW_EVE
+*&---------------------------------------------------------------------*
+INITIALIZATION.
+  PERFORM initialization.
+
+AT SELECTION-SCREEN OUTPUT.
+  PERFORM selection_screen.
+
+  "Berechtigungsanzeige für Archivdaten
+  gv_auth_arch = abap_true.
+
+  AUTHORITY-CHECK OBJECT 'Z_ORDVIEWA'
+           ID 'ACTVT' FIELD '03'.  "Anzeigen
+  "         ID 'TABLE' FIELD '__________'.
+  IF sy-subrc <> 0.
+    gv_auth_arch = abap_false.
+  ENDIF.
+
+*KKU 2104-012
+  LOOP AT SCREEN.
+    IF screen-group1 = 'MG1'.
+      screen-intensified = 1.
+      MODIFY SCREEN.
+    ENDIF.
+
+    IF screen-name = 'PA_ARCHI'.
+      IF  gv_auth_arch = abap_false.
+        screen-input = 0.  "nicht eingebbar
+        MODIFY SCREEN.
+      ENDIF.
+    ENDIF.
+  ENDLOOP.
+*KKU End
+
+
+AT SELECTION-SCREEN ON pa_vari.
+  PERFORM check_vari USING pa_vari.
+
+  "Infotext/Doku  anzeigen angelegt mit SE61, übersetzt mit SE63
+
+AT SELECTION-SCREEN ON HELP-REQUEST FOR pa_archi.
+  CALL FUNCTION 'POPUP_DISPLAY_TEXT'
+    EXPORTING
+      language       = sy-langu
+      popup_title    = 'Information Archiv'
+*     START_COLUMN   = 10
+*     START_ROW      = 3
+      text_object    = 'ZORDERVIEW_ARCHIV_CHECK'
+      help_modal     = ' '
+* IMPORTING
+*     CANCELLED      =
+    EXCEPTIONS
+      text_not_found = 1
+      OTHERS         = 2.
+  IF sy-subrc <> 0.
+* Implement suitable error handling here
+  ENDIF.
+
+
+AT SELECTION-SCREEN ON VALUE-REQUEST FOR pa_vari.
+  PERFORM value_request_vari CHANGING pa_vari.
+
+AT SELECTION-SCREEN.
+  "Info-Button zu Archiv
+  IF sscrfields = 'YZ'.
+    CLEAR sscrfields-ucomm.
+    CALL FUNCTION 'POPUP_DISPLAY_TEXT'
+      EXPORTING
+        language       = sy-langu
+        popup_title    = 'Information Archiv'
+*       START_COLUMN   = 10
+*       START_ROW      = 3
+        text_object    = 'ZORDERVIEW_ARCHIV_CHECK'
+        help_modal     = ' '
+* IMPORTING
+*       CANCELLED      =
+      EXCEPTIONS
+        text_not_found = 1
+        OTHERS         = 2.
+    IF sy-subrc <> 0.
+* Implement suitable error handling here
+    ENDIF.
+  ENDIF.
+
+  CHECK ( sscrfields-ucomm = 'ONLI' OR sscrfields-ucomm = 'PRIN' ).
+  CHECK sy-dynnr = '1000'.
+  PERFORM show_progress USING 10 TEXT-t07.
+  ycl_base=>write_replog( ).
+
+  IF gv_auth_arch = abap_true.
+    "Wert Ankreuzfeld
+    gv_auth_arch = pa_archi.
+  ENDIF.
+  PERFORM get_data.
+
+  IF pa_rueck EQ c_true.
+    IF NOT gt_ord_full[] IS INITIAL.
+      PERFORM select_returns.
+    ENDIF.
+  ENDIF.
+
+START-OF-SELECTION.
+  PERFORM build_list.

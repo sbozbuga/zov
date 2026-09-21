@@ -1,0 +1,269 @@
+@EndUserText.label : 'Auftrags- und Meldungsdaten'
+@AbapCatalog.enhancement.category : #EXTENSIBLE_CHARACTER_NUMERIC
+@AbapCatalog.tableCategory : #TRANSPARENT
+@AbapCatalog.deliveryClass : #A
+@AbapCatalog.dataMaintenance : #ALLOWED
+define table /cellag/ordview {
+
+  key mandt        : mandt not null;
+  key qmnum        : qmnum not null;
+  key fenum        : felfd not null;
+  key counter      : cim_count not null;
+  qmart            : qmart;
+  prozesstyp       : /cellag/prozesstyp;
+  @AbapCatalog.foreignKey.screenCheck : true
+  werks            : werks_d
+    with foreign key t001w
+      where mandt = /cellag/ordview.mandt
+        and werks = /cellag/ordview.werks;
+  otgrp            : /cellag/otgrp;
+  akz              : /cellag/akz;
+  skz              : /cellag/skz;
+  archivflag       : /cellag/archivflag;
+  orderstatecompl  : /cellag/orderstatecompl;
+  orderdate        : /cellag/orderdate;
+  uhrzeitorder     : /cellag/uhrzeitorder;
+  dateclosed       : /cellag/dateclosed;
+  kundewunschterm  : /cellag/kundewunschterm;
+  dockdate         : /cellag/dockdate;
+  no_docking       : /cellag/no_docking;
+  receivedate      : /cellag/receivedate;
+  repdauer         : /cellag/repdauer;
+  kaltage          : /cellag/kaltage;
+  auftragsendesoll : /cellag/auftragsendesoll;
+  initcommitdate   : /cellag/initcommitdate;
+  fanumber         : /cellag/fanumber;
+  fadate           : /cellag/fadate;
+  fastart          : /cellag/fastart;
+  faend            : /cellag/faend;
+  rsende           : /cellag/rsende;
+  webaz            : webaz;
+  einlagerdate     : /cellag/einlagerdate;
+  tat              : /cellag/tat;
+  overdue          : /cellag/overdue;
+  aussonderung     : /cellag/aussonderung;
+  labelprint       : /cellag/labelprint;
+  delnotenumber    : vbeln_vl;
+  delnoteposnr     : zdposnr_vl;
+  @AbapCatalog.foreignKey.screenCheck : true
+  shipto           : kunwe
+    with foreign key kna1
+      where mandt = /cellag/ordview.mandt
+        and kunnr = /cellag/ordview.shipto;
+  shipto_name1     : ad_name1;
+  shipto_name2     : ad_name2;
+  shipto_name3     : ad_name3;
+  shipto_street    : ad_street;
+  shipto_house_num : ad_hsnm1;
+  shipto_post_code : ad_pstcd1;
+  shipto_city1     : ad_city1;
+  shipto_sort1     : ad_sort1;
+  delnoteprint     : /cellag/delnoteprint;
+  readytoship      : /cellag/readytoship;
+  deliverdate      : /cellag/deliverdate;
+  qmel_usr11       : /cellag/sla;
+  slabez           : /cellag/slabez;
+  vbeln            : vbeln_va;
+  posnr            : zdposnr_va;
+  @AbapCatalog.foreignKey.screenCheck : true
+  vsbed            : vsbed
+    with foreign key tvsb
+      where mandt = /cellag/ordview.mandt
+        and vsbed = /cellag/ordview.vsbed;
+  @AbapCatalog.foreignKey.screenCheck : true
+  customergroup    : kvgr1
+    with foreign key tvv1
+      where mandt = /cellag/ordview.mandt
+        and kvgr1 = /cellag/ordview.customergroup;
+  @AbapCatalog.foreignKey.screenCheck : true
+  customergroupwe  : /cellag/customergroupwe
+    with foreign key tvv1
+      where mandt = /cellag/ordview.mandt
+        and kvgr1 = /cellag/ordview.customergroupwe;
+  @AbapCatalog.foreignKey.screenCheck : true
+  kundennummer     : kunag
+    with foreign key kna1
+      where mandt = /cellag/ordview.mandt
+        and kunnr = /cellag/ordview.kundennummer;
+  retoure          : /cellag/retoure;
+  @AbapCatalog.foreignKey.screenCheck : true
+  prctr            : prctr
+    with foreign key cepc
+      where mandt = /cellag/ordview.mandt
+        and prctr = /cellag/ordview.prctr
+        and datbi = /cellag/ordview.orderdate;
+  purchaseorder    : /cellag/purchaseord1;
+  purchaseorder_i  : /cellag/purchaseorder_pos;
+  purchaseorder2   : /cellag/purchaseord2;
+  purchaseorder2_i : /cellag/purchaseorder2_pos;
+  purchase_bname   : /cellag/bname;
+  qmfe_usr02       : /cellag/qmfe_usr02;
+  qmfe_usr03       : /cellag/qmfe_usr03;
+  vendornummer     : lifnr;
+  vendor           : /cellag/vendor;
+  purchasenumber   : ebeln;
+  ebelp            : zdebelp;
+  zyrmano          : /cellag/zzrmano;
+  vendordate       : /cellag/vendordate;
+  vendorrueck      : /cellag/vendorrueck;
+  @AbapCatalog.foreignKey.screenCheck : true
+  ctdisapmatnummer : matnr
+    with foreign key mara
+      where mandt = /cellag/ordview.mandt
+        and matnr = /cellag/ordview.ctdisapmatnummer;
+  partnumberalc    : /cellag/partnumberalc;
+  partdescr        : /cellag/partdescr;
+  techcode         : /cellag/techcode;
+  systemdescr      : /cellag/imp_system;
+  kundetechcode    : /cellag/imp_matui;
+  prodatt8         : /cellag/prot8;
+  prodatt7         : prat7;
+  @AbapCatalog.foreignKey.keyType : #NON_KEY
+  @AbapCatalog.foreignKey.screenCheck : true
+  ps_psp_pnr       : ps_psp_pnr not null
+    with foreign key [0..*,0..1] prps
+      where mandt = /cellag/ordview.mandt
+        and pspnr = /cellag/ordview.ps_psp_pnr;
+  normt            : /ctdi/kdmat18;
+  yimp_hkz3        : /cellag/imp_hkz3;
+  hersteller       : mfrnr;
+  equipmentnummer  : equnr;
+  serialmeld       : /cellag/serialmeld;
+  serialrec        : /cellag/serialrec;
+  serialdeliver    : /cellag/serialdeliver;
+  partnumberout    : /cellag/partnumberout;
+  lieferlager      : /cellag/lieferlager;
+  lieferwerk       : /cellag/lieferwerk;
+  @Semantics.amount.currencyCode : '/cellag/ordview.waerk'
+  vendorpreis      : /cellag/vendorpreis;
+  @AbapCatalog.foreignKey.screenCheck : true
+  hswae            : hswae
+    with foreign key tcurc
+      where mandt = /cellag/ordview.mandt
+        and waers = /cellag/ordview.hswae;
+  @Semantics.amount.currencyCode : '/cellag/ordview.waerk'
+  price            : /cellag/price;
+  @AbapCatalog.foreignKey.screenCheck : true
+  waerk            : waerk
+    with foreign key tcurc
+      where mandt = /cellag/ordview.mandt
+        and waers = /cellag/ordview.waerk;
+  @Semantics.amount.currencyCode : '/cellag/ordview.waers'
+  fakturapreis     : /cellag/fakturapreis;
+  waers            : /cellag/faktwaers;
+  @Semantics.amount.currencyCode : '/cellag/ordview.mwaers'
+  matpreis         : /cellag/matpreis;
+  mwaers           : /cellag/matprwaers;
+  @Semantics.amount.currencyCode : '/cellag/ordview.mswaers'
+  matrpeisstand    : /cellag/matpreisstand;
+  mswaers          : /cellag/matstwaers;
+  lastupdate       : /cellag/lastupdate;
+  rechnummer       : vbeln_vf;
+  fkstk            : fkstk;
+  rechdatum        : /cellag/rechdatum;
+  awb              : /cellag/trackn;
+  shipper          : /cellag/exti1;
+  shipdate         : /cellag/shipdate;
+  trackdate        : /cellag/tracktime;
+  breakstart       : /cellag/breakstart;
+  breakend         : /cellag/breakend;
+  breakduration    : /cellag/breakduration;
+  mncodunterbr     : /cellag/mncodunterbr;
+  matxt            : /cellag/matxt;
+  wbsta            : wbsta;
+  fcode            : /cellag/fcode;
+  fcodetext        : /cellag/fcodetext;
+  flage            : /cellag/flage;
+  flagetxt         : /cellag/flagetxt;
+  fart             : /cellag/fart;
+  farttext         : /cellag/farttext;
+  errortext        : /cellag/errortxt;
+  fehler1          : /cellag/fehler1;
+  matnr_out        : /cellag/matnr_out;
+  partnumberin     : /cellag/partnumberin;
+  @AbapCatalog.foreignKey.screenCheck : true
+  objnr            : qmobjnr
+    with foreign key onr00
+      where mandt = /cellag/ordview.mandt
+        and objnr = /cellag/ordview.objnr;
+  yliefvend        : /cellag/liefvend;
+  yliefvendpos     : /cellag/liefvendpos;
+  yliefvendvdat    : /cellag/liefvdat;
+  @Semantics.amount.currencyCode : '/cellag/ordview.kpwaers'
+  komppreis        : /cellag/komppreis;
+  kpwaers          : /cellag/kpwaers;
+  @AbapCatalog.foreignKey.screenCheck : true
+  vkorg            : vkorg
+    with foreign key tvko
+      where mandt = /cellag/ordview.mandt
+        and vkorg = /cellag/ordview.vkorg;
+  @AbapCatalog.foreignKey.screenCheck : true
+  vtweg            : vtweg
+    with foreign key tvtw
+      where mandt = /cellag/ordview.mandt
+        and vtweg = /cellag/ordview.vtweg;
+  @AbapCatalog.foreignKey.screenCheck : true
+  spart            : spart
+    with foreign key tspa
+      where mandt = /cellag/ordview.mandt
+        and spart = /cellag/ordview.spart;
+  @AbapCatalog.foreignKey.screenCheck : true
+  abgru            : abgru_va
+    with foreign key tvag
+      where mandt = /cellag/ordview.mandt
+        and abgru = /cellag/ordview.abgru;
+  bmeng            : qanzfehl4;
+  wktnr            : wktnr;
+  wktps            : wktps;
+  ressort          : /cellag/ressort not null;
+  sernrrec         : /cellag/sernrrec;
+  sernrlif         : /cellag/sernrlif;
+  retoure_posnr    : zdretposnr;
+  sernraufnr       : /cellag/sernraufnr;
+  nlpti            : zd_nlpti not null;
+  extkostle        : zd_extkostle not null;
+  kdsachbe         : zd_kdsachbe not null;
+  tracknvend       : zd_tracknvend not null;
+  trackdatevend    : zd_trackdatevend not null;
+  tknum            : tknum not null;
+  exti1            : exti1 not null;
+  qmfe_usr08       : zd_qmfe_usr08 not null;
+  matnr_in         : zd_matnr_in not null;
+  zx_dockdate      : zd_zx_dockdate not null;
+  zx_labelprint    : zd_zx_labelprint not null;
+  zx_deliverdate   : zd_zx_deliverdate not null;
+  route            : route not null;
+  zx_remarksrs     : zd_zx_remarksrs not null;
+  zx_remarksvm     : zd_zx_remarksvm not null;
+  ccm_matno_01     : zdccm_matno_01 not null;
+  ccm_matno_02     : zdccm_matno_02 not null;
+  ccm_matno_03     : zdccm_matno_03 not null;
+  ccm_vendor       : zdccm_vendor not null;
+  ccm_vendor_adr   : zdccm_vendor_adr not null;
+  ccm_vendor_info1 : zdccm_vendor_info_1 not null;
+  ccm_vendor_info2 : zdccm_vendor_info_2 not null;
+  ccm_zinfo1       : zdccm_zinfo1 not null;
+  ccm_zinfo2       : zdccm_zinfo2 not null;
+  ccm_zinfo3       : zdccm_zinfo3 not null;
+  tanum            : tanum not null;
+  einlagzt         : zdeinlagzt not null;
+  datum_q_frei     : zddatum_q_frei not null;
+  uzeit_q_frei     : zduzeit_q_frei not null;
+  bstnk            : zdbstnk not null;
+  meldpos          : /cellag/qmnumf;
+  likp_erdat       : zdlikp_erdat;
+  sernp            : serail not null;
+  tracktime        : zd_tracktime not null;
+  akz_we           : zd_akz_we not null;
+  closed_exception : zd_closed_exp not null;
+  kostv            : aufkostv not null;
+  prctr_umsatz     : zd_prctr_umsatz;
+  fast_good_parts  : zd_fast_good_parts not null;
+  @Semantics.amount.currencyCode : '/cellag/ordview.kpwaers'
+  workshop_rate    : zd_workshop_rate not null;
+  ymds             : yymds not null;
+  gbstk            : gbstk not null;
+  fetxt            : zdfetxt not null;
+  include zorderview_inc not null;
+
+}

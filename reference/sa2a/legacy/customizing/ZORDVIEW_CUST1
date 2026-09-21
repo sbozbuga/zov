@@ -1,0 +1,13 @@
+@EndUserText.label : 'Steuertabelle /CELLAG/ORDVIEW Archivkz und Prozessende'
+@AbapCatalog.enhancement.category : #EXTENSIBLE_CHARACTER
+@AbapCatalog.tableCategory : #TRANSPARENT
+@AbapCatalog.deliveryClass : #C
+@AbapCatalog.dataMaintenance : #ALLOWED
+define table zordview_cust1 {
+
+  key mandt     : mandt not null;
+  key wktnr     : wktnr not null;
+  no_invoic_sd  : zde_no_invoic_sd;
+  scrap_prc_end : zde_scrap_prc_end;
+
+}

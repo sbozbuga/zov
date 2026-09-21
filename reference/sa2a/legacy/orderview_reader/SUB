@@ -1,0 +1,3082 @@
+*&---------------------------------------------------------------------*
+*&  Include           /CELLAG/ORDERVIEW_SUB
+*&---------------------------------------------------------------------*
+*&---------------------------------------------------------------------*
+*&      Define BUILD_RANGE
+*&---------------------------------------------------------------------*
+DEFINE build_range.
+  CLEAR &2. REFRESH &2[].
+
+  gv_index_from = ( sy-index - 1 ) * c_max_lines_range + 1.
+  gv_index_to = sy-index * c_max_lines_range.
+
+  APPEND LINES OF &1[] FROM gv_index_from TO gv_index_to
+  TO &2[].
+
+  IF &2[] IS INITIAL.
+    EXIT.
+  ENDIF.
+END-OF-DEFINITION.
+
+*&---------------------------------------------------------------------*
+*&      Define BUILD_TABLE
+*&---------------------------------------------------------------------*
+DEFINE build_table.
+  CLEAR: gv_index_from,
+         gv_index_to.
+
+  CLEAR &2. REFRESH &2[].
+
+  gv_index_from = ( sy-index - 1 ) * c_max_lines_table + 1.
+  gv_index_to = sy-index * c_max_lines_table.
+
+  APPEND LINES OF &1[] FROM gv_index_from TO gv_index_to
+  TO &2[].
+
+  IF &2[] IS INITIAL.
+    EXIT.
+  ENDIF.
+END-OF-DEFINITION.
+
+
+*&---------------------------------------------------------------------*
+*&      Form  INITIALIZATION
+*&---------------------------------------------------------------------*
+FORM initialization .
+
+  DATA: BEGIN OF lt_qpgr OCCURS 0,
+          codegruppe LIKE qpgr-codegruppe,
+          kurztext   LIKE qpgt-kurztext,
+        END OF lt_qpgr.
+
+  gv_repid = sy-repid.
+  gv_tcode = sy-tcode.
+  pa_sel1 = TEXT-004.
+  pa_sel2 = TEXT-005.
+
+  pa_spras = sy-langu.
+
+  "Zugriff auf Split-Tabelle?
+  IF sy-tcode = co_tcode_fr1.
+    gv_tabname = co_tab_fr1.
+  ELSE.
+    gv_tabname = co_tab_ordview.
+  ENDIF.
+
+ENDFORM.                    " INITIALIZATION
+*&---------------------------------------------------------------------*
+*&      Form  SELECTION_SCREEN
+*&---------------------------------------------------------------------*
+FORM selection_screen .
+  DATA : lwa_variant TYPE disvariant.
+
+* Get default variant
+  IF pa_vari IS INITIAL.
+    lwa_variant-report = gv_repid.
+    CALL FUNCTION 'REUSE_ALV_VARIANT_DEFAULT_GET'
+      CHANGING
+        cs_variant    = lwa_variant
+      EXCEPTIONS
+        wrong_input   = 1
+        not_found     = 2
+        program_error = 3
+        OTHERS        = 4.
+    IF sy-subrc = 0.
+      pa_vari = lwa_variant-variant.
+    ENDIF.
+  ENDIF.
+
+  "Hilfebutton Archiv
+  CONCATENATE icon_information TEXT-010 INTO but1 SEPARATED BY space.
+ENDFORM.                    " SELECTION_SCREEN
+*&---------------------------------------------------------------------*
+*&      Form  CHECK_VARI
+*&---------------------------------------------------------------------*
+FORM check_vari USING if_vari TYPE disvariant-variant.
+  DATA: lwa_variant TYPE disvariant.
+
+  CHECK NOT if_vari IS INITIAL.
+  lwa_variant-report = gv_repid.
+  lwa_variant-variant = if_vari.
+  CALL FUNCTION 'REUSE_ALV_VARIANT_EXISTENCE'
+    CHANGING
+      cs_variant    = lwa_variant
+    EXCEPTIONS
+      wrong_input   = 1
+      not_found     = 2
+      program_error = 3
+      OTHERS        = 4.
+
+  CHECK sy-subrc <> 0.
+  CLEAR sscrfields-ucomm.
+  MESSAGE ID sy-msgid TYPE sy-msgty NUMBER sy-msgno
+          WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4.
+
+ENDFORM.                    " CHECK_VARI
+*&---------------------------------------------------------------------*
+*&      Form  VALUE_REQUEST_VARI
+*&---------------------------------------------------------------------*
+FORM value_request_vari CHANGING cf_vari TYPE disvariant-variant.
+  DATA : lwa_variant TYPE disvariant.
+
+  lwa_variant-report = sy-repid.
+  CALL FUNCTION 'REUSE_ALV_VARIANT_F4'
+    EXPORTING
+      is_variant    = lwa_variant
+    IMPORTING
+      es_variant    = lwa_variant
+    EXCEPTIONS
+      not_found     = 1
+      program_error = 2
+      OTHERS        = 3.
+  CHECK syst-subrc = 0.
+  cf_vari = lwa_variant-variant.
+
+ENDFORM.                    " VALUE_REQUEST_VARI
+*&---------------------------------------------------------------------*
+*&      Form  GET_DATA
+*&---------------------------------------------------------------------*
+FORM get_data .
+  CLEAR gt_ord_full. REFRESH gt_ord_full.
+
+  PERFORM increment_statistic.            "MK 25.06.2020 Ticket 2006-849
+
+  PERFORM init_date_ranges.
+
+  PERFORM build_merkmal_ranges.
+
+  PERFORM get_general_data.
+
+  IF NOT s_qmnump[] IS INITIAL.
+*    PERFORM get_qmnump_data.
+    PERFORM get_qmnump_data_new.
+    PERFORM get_add_data.   "Lieferant und ADD_Daten  lesen
+  ELSE.
+
+    IF NOT gr_actualcommitdate[] IS INITIAL OR
+       NOT s_prior[] IS INITIAL OR
+       NOT s_statu[] IS INITIAL.
+      PERFORM get_ord_add_data.
+    ELSE.
+      PERFORM get_orderview_data.
+    ENDIF.
+
+  ENDIF.
+
+ENDFORM.                    " GET_DATA
+*&---------------------------------------------------------------------*
+*&      Form  INIT_DATE_RANGES
+*&---------------------------------------------------------------------*
+FORM init_date_ranges .
+  CLEAR gr_orderdate. REFRESH gr_orderdate.
+  CLEAR gr_dockdate. REFRESH gr_dockdate.
+  CLEAR gr_receivedate. REFRESH gr_receivedate.
+  CLEAR gr_fastart[].
+  CLEAR gr_faend. REFRESH gr_faend.
+  CLEAR gr_rsende. REFRESH gr_rsende.
+  CLEAR gr_deliverdate. REFRESH gr_deliverdate.
+  CLEAR gr_einlagerdate. REFRESH gr_einlagerdate.
+  CLEAR gr_vendordate. REFRESH gr_vendordate.
+  CLEAR gr_vendorrueck. REFRESH gr_vendorrueck.
+  CLEAR gr_auftragsendesoll. REFRESH gr_auftragsendesoll.
+  CLEAR gr_actualcommitdate. REFRESH gr_actualcommitdate.
+  CLEAR gr_dateclosed. REFRESH gr_dateclosed.
+
+  CASE pa_sel01.
+    WHEN c_true.
+      gr_orderdate[] = s_orded[].
+  ENDCASE.
+  CASE pa_sel02.
+    WHEN c_true.
+      gr_dockdate[] = s_orded[].
+  ENDCASE.
+  CASE pa_sel03.
+    WHEN c_true.
+      gr_receivedate[] = s_orded[].
+  ENDCASE.
+  CASE pa_sel13.
+    WHEN c_true.
+      gr_fastart[] = s_orded[].
+  ENDCASE.
+  CASE pa_sel04.
+    WHEN c_true.
+      gr_faend[] = s_orded[].
+  ENDCASE.
+  CASE pa_sel05.
+    WHEN c_true.
+      gr_rsende[] = s_orded[].
+  ENDCASE.
+  CASE pa_sel06.
+    WHEN c_true.
+      gr_deliverdate[] = s_orded[].
+  ENDCASE.
+  CASE pa_sel07.
+    WHEN c_true.
+      gr_einlagerdate[] = s_orded[].
+  ENDCASE.
+  CASE pa_sel08.
+    WHEN c_true.
+      gr_vendordate[] = s_orded[].
+  ENDCASE.
+  CASE pa_sel09.
+    WHEN c_true.
+      gr_vendorrueck[] = s_orded[].
+  ENDCASE.
+  CASE pa_sel10.
+    WHEN c_true.
+      gr_auftragsendesoll[] = s_orded[].
+  ENDCASE.
+  CASE pa_sel11.
+    WHEN c_true.
+      gr_actualcommitdate[] = s_orded[].
+  ENDCASE.
+  CASE pa_sel12.
+    WHEN c_true.
+      gr_dateclosed[] = s_orded[].
+  ENDCASE.
+
+ENDFORM.                    " INIT_DATE_RANGES
+*&---------------------------------------------------------------------*
+*&      Form  GET_QMNUMP_DATA
+*       1601-632 Sortierung beibehalten bei Angabe QMELPOS
+*       ausgelagert
+*&---------------------------------------------------------------------*
+FORM get_qmnump_data .
+
+  DATA: BEGIN OF lt_lifnr OCCURS 0,
+          lifnr LIKE lfa1-lifnr,
+        END OF lt_lifnr.
+  DATA: lt_lifnr_par LIKE lt_lifnr OCCURS 0 WITH HEADER LINE.
+
+  DATA: lv_len1  TYPE i,
+        lv_pos   TYPE i,
+        lv_qmnum LIKE qmfe-qmnum,
+        lv_fenum LIKE qmfe-fenum,
+        lv_cnt   TYPE felfd.
+
+  RANGES: lr_qmnum FOR /cellag/ordview-qmnum,
+          lr_qmnum_par FOR /cellag/ordview-qmnum,
+          lr_qmnump FOR gv_qmnump.
+
+  CLEAR lr_qmnump. REFRESH lr_qmnump.
+  CLEAR lr_qmnum. REFRESH lr_qmnum.
+  LOOP AT s_qmnump.
+    lv_len1 = strlen( s_qmnump-low ).
+    lv_pos = lv_len1 - 4.
+    CHECK lv_pos GT 0.
+    lv_qmnum = s_qmnump-low(lv_pos).
+    CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
+      EXPORTING
+        input  = lv_qmnum
+      IMPORTING
+        output = lv_qmnum.
+    lv_fenum = s_qmnump-low+lv_pos(4).
+    lr_qmnump-sign = s_qmnump-sign.
+    lr_qmnump-option = s_qmnump-option.
+    CONCATENATE lv_qmnum lv_fenum INTO lr_qmnump-low.
+    APPEND lr_qmnump.
+    CLEAR lr_qmnump.
+    lr_qmnum-sign = s_qmnump-sign.
+    lr_qmnum-option = s_qmnump-option.
+    lr_qmnum-low = lv_qmnum.
+    APPEND lr_qmnum. CLEAR lr_qmnum.
+  ENDLOOP.
+
+  CLEAR gt_ordview. REFRESH gt_ordview.
+  CLEAR gt_ordview_qmnump. REFRESH gt_ordview_qmnump.
+  CLEAR gt_ord_add. REFRESH gt_ord_add.
+  CLEAR gt_ord_full. REFRESH gt_ord_full.
+
+  IF NOT lr_qmnum[] IS INITIAL.
+    SELECT SINGLE * FROM /cellag/ordview
+    WHERE qmnum IN lr_qmnum.
+    IF sy-subrc NE 0.
+      IF gv_auth_arch = abap_true.                          "HB071021
+        SELECT SINGLE * FROM zordview_archiv
+        WHERE qmnum IN lr_qmnum.
+        IF sy-subrc NE 0.
+          EXIT.
+        ENDIF.
+      ENDIF.
+    ENDIF.
+
+    DO.
+      build_range lr_qmnum lr_qmnum_par.
+      SELECT * FROM /cellag/ordview APPENDING TABLE gt_ordview
+      WHERE qmnum IN lr_qmnum_par.
+      IF gv_auth_arch = abap_true.                          "HB071021
+        SELECT * FROM zordview_archiv APPENDING TABLE gt_ordview
+        WHERE qmnum IN lr_qmnum_par.
+      ENDIF.
+    ENDDO.
+  ENDIF.
+
+  LOOP AT gt_ordview.
+    MOVE-CORRESPONDING gt_ordview TO gt_ordview_qmnump.
+    CONCATENATE gt_ordview-qmnum gt_ordview-fenum INTO gt_ordview_qmnump-qmnump.
+    APPEND gt_ordview_qmnump. CLEAR gt_ordview_qmnump.
+  ENDLOOP.
+
+  SORT gt_ordview_qmnump BY qmnum fenum counter.
+
+  DELETE gt_ordview_qmnump WHERE NOT qmnump IN lr_qmnump.
+
+  CLEAR lt_lifnr. REFRESH lt_lifnr.
+  CLEAR lr_qmnum. REFRESH lr_qmnum.
+  lr_qmnum-sign = 'I'.
+  lr_qmnum-option = 'EQ'.
+
+  CLEAR gt_ordview_qmnump.
+  LOOP AT gt_ordview_qmnump.
+    lr_qmnum-low = gt_ordview_qmnump-qmnum.
+    COLLECT lr_qmnum.
+    IF NOT gt_ordview_qmnump-hersteller IS INITIAL.
+      lt_lifnr-lifnr = gt_ordview_qmnump-hersteller.
+      COLLECT lt_lifnr.
+      CLEAR lt_lifnr.
+    ENDIF.
+  ENDLOOP.
+  CLEAR lr_qmnum.
+
+  SORT lr_qmnum.
+
+  CLEAR lr_qmnum_par. REFRESH lr_qmnum_par.
+  IF NOT lr_qmnum[] IS INITIAL.
+    DO.
+      build_table lr_qmnum lr_qmnum_par.
+      SELECT * FROM /cellag/ord_add APPENDING TABLE gt_ord_add
+      FOR ALL ENTRIES IN lr_qmnum_par
+      WHERE qmnum = lr_qmnum_par-low.
+    ENDDO.
+  ENDIF.
+
+  SORT gt_ord_add BY qmnum fenum counter.
+
+  SORT lt_lifnr.
+  CLEAR gt_lfa1. REFRESH gt_lfa1.
+  IF NOT lt_lifnr[] IS INITIAL.
+    DO.
+      build_table lt_lifnr lt_lifnr_par.
+      SELECT lifnr name1 FROM lfa1
+      APPENDING TABLE gt_lfa1
+      FOR ALL ENTRIES IN lt_lifnr_par
+      WHERE lifnr = lt_lifnr_par-lifnr.
+    ENDDO.
+  ENDIF.
+
+  SORT gt_lfa1 BY lifnr.
+
+  CLEAR gt_ordview_qmnump.
+  LOOP AT gt_ordview_qmnump.
+    MOVE-CORRESPONDING gt_ordview_qmnump TO gt_ord_full.
+    CLEAR gt_ord_add.
+    READ TABLE gt_ord_add WITH KEY qmnum = gt_ordview_qmnump-qmnum
+                                   fenum = gt_ordview_qmnump-fenum
+                                   counter = gt_ordview_qmnump-counter
+    BINARY SEARCH.
+    IF sy-subrc EQ 0.
+      MOVE-CORRESPONDING gt_ord_add TO gt_ord_full.
+    ENDIF.
+
+    CLEAR gt_lfa1.
+    READ TABLE gt_lfa1 WITH KEY lifnr = gt_ordview-hersteller
+    BINARY SEARCH.
+    IF sy-subrc EQ 0.
+      gt_ord_full-herstellername = gt_lfa1-name1.
+    ENDIF.
+
+    "Gesamtnr mit Counter: zuerst in NUMC konvertieren
+    lv_cnt = gt_ord_full-counter.
+    CONCATENATE gt_ord_full-meldpos lv_cnt INTO gt_ord_full-qmnumposcnt. "HB230116
+
+    APPEND gt_ord_full.
+    CLEAR gt_ord_full.
+  ENDLOOP.
+ENDFORM.                    " GET_QMNUMP_DATA
+*&---------------------------------------------------------------------*
+*&      Form  BUILD_LIST
+*&---------------------------------------------------------------------*
+FORM build_list .
+
+  DATA: lwa_fieldcat TYPE slis_fieldcat_alv.
+  DATA: lv_lines TYPE sy-dbcnt.
+
+  PERFORM build_fieldcat.
+  PERFORM get_layout.
+
+  CLEAR lv_lines.
+  DESCRIBE TABLE gt_ord_full LINES lv_lines.
+  WRITE lv_lines TO gv_title LEFT-JUSTIFIED.
+  CONCATENATE TEXT-t06 gv_title INTO gv_title
+  SEPARATED BY space.
+
+  CALL FUNCTION 'REUSE_ALV_GRID_DISPLAY'
+    EXPORTING
+      i_callback_program       = gv_repid
+      i_callback_pf_status_set = 'ALV_SET_PF_STATUS'
+      i_callback_user_command  = 'ALV_USER_COMMAND'
+      i_grid_title             = gv_title
+      is_layout                = gwa_layout
+      it_fieldcat              = gt_fieldcat[]
+      i_save                   = 'A'
+      is_variant               = gwa_variant
+    TABLES
+      t_outtab                 = gt_ord_full[]
+    EXCEPTIONS
+      program_error            = 1
+      OTHERS                   = 2.
+
+
+  CLEAR lwa_fieldcat.
+  LOOP AT gt_fieldcat INTO lwa_fieldcat.
+    CASE lwa_fieldcat-fieldname.
+      WHEN 'SERNRREC' OR 'SERNRLIF'.
+        lwa_fieldcat-no_out = c_true.
+        MODIFY gt_fieldcat FROM lwa_fieldcat.
+    ENDCASE.
+  ENDLOOP.
+ENDFORM.                    " BUILD_LIST
+*&---------------------------------------------------------------------*
+*&      Form  BUILD_FIELDCAT
+*&---------------------------------------------------------------------*
+FORM build_fieldcat .
+
+  DATA: lwa_fieldcat TYPE slis_fieldcat_alv.
+
+  CALL FUNCTION 'REUSE_ALV_FIELDCATALOG_MERGE'
+    EXPORTING
+      i_program_name         = gv_repid
+      i_structure_name       = '/CELLAG/ORD_FULL'
+    CHANGING
+      ct_fieldcat            = gt_fieldcat[]
+    EXCEPTIONS
+      inconsistent_interface = 1
+      program_error          = 2
+      OTHERS                 = 3.
+
+  CLEAR lwa_fieldcat.
+  LOOP AT gt_fieldcat INTO lwa_fieldcat.
+    CASE lwa_fieldcat-fieldname.
+      WHEN 'QMNUM' OR 'FENUM' OR 'COUNTER'.
+        lwa_fieldcat-key = c_true.
+        MODIFY gt_fieldcat FROM lwa_fieldcat INDEX sy-tabix.
+    ENDCASE.
+  ENDLOOP.
+
+
+ENDFORM.                    " BUILD_FIELDCAT
+*&---------------------------------------------------------------------*
+*&      Form  GET_LAYOUT
+*&---------------------------------------------------------------------*
+FORM get_layout .
+  CLEAR gwa_variant.
+
+  gwa_layout-colwidth_optimize = c_true.
+  gwa_layout-zebra = c_true.
+  gwa_layout-f2code = 'PICK'.
+  gwa_layout-box_fieldname = 'SELECTED'.  "field for checkbox
+
+  IF NOT pa_vari IS INITIAL.
+    gwa_variant-report = gv_repid.
+    gwa_variant-variant = pa_vari.
+  ENDIF.
+
+ENDFORM.                    " GET_LAYOUT
+
+*---------------------------------------------------------------------*
+*       FORM ALV_USER_COMMAND                                         *
+*---------------------------------------------------------------------*
+FORM alv_user_command USING if_ucomm TYPE sy-ucomm
+                            if_selfield TYPE slis_selfield.
+
+  CASE if_ucomm.
+    WHEN 'YDETAIL'.
+      PERFORM fcode_detail_alv USING if_selfield.
+    WHEN 'YMOD'.
+      PERFORM fcode_change_data USING if_selfield.
+    WHEN 'YDISP'.
+      PERFORM fcode_disp_data USING if_selfield.
+
+      "Z2 Kommentare (alt)
+    WHEN 'YUPL'.
+      PERFORM fcode_upload_data USING if_selfield.
+
+      "Z1 Kommentare Langtexte
+    WHEN 'YUPZ1'.
+      PERFORM fcode_upload_z1_ltxt USING if_selfield.
+
+    WHEN 'PICK'.
+      PERFORM fcode_pick_alv USING if_selfield.
+    WHEN 'FEHLBER'.
+      PERFORM fcode_fehlber_alv USING if_selfield.
+    WHEN 'RHOB'.
+      PERFORM fcode_rhob_alv USING if_selfield.
+    WHEN OTHERS.
+  ENDCASE.
+
+ENDFORM.                    "alv_user_command
+
+*---------------------------------------------------------------------*
+*       FORM ALV_SET_PF_STATUS                                        *
+*---------------------------------------------------------------------*
+FORM alv_set_pf_status                                      "#EC CALLED
+     USING it_extab TYPE slis_t_extab.
+
+  SET PF-STATUS 'STANDARD' EXCLUDING it_extab.
+
+ENDFORM.                    "alv_set_pf_status
+*&---------------------------------------------------------------------*
+*&      Form  GET_ORD_ADD_DATA
+*&---------------------------------------------------------------------*
+FORM get_ord_add_data .
+
+  DATA: BEGIN OF lt_lifnr OCCURS 0,
+          lifnr LIKE lfa1-lifnr,
+        END OF lt_lifnr.
+
+  DATA: lt_key_par   LIKE gt_key OCCURS 0 WITH HEADER LINE,
+        lt_lifnr_par LIKE lt_lifnr OCCURS 0 WITH HEADER LINE,
+        lv_cnt       TYPE felfd.
+
+  CLEAR gt_ordview. REFRESH gt_ordview.
+  CLEAR gt_ord_add. REFRESH gt_ord_add.
+  CLEAR gt_ord_full. REFRESH gt_ord_full.
+
+  SELECT SINGLE * FROM /cellag/ord_add WHERE qmnum IN s_qmnum AND
+                                       actualcommitdate IN gr_actualcommitdate AND
+                                       status IN s_statu AND
+                                       priority IN s_prior.
+  IF sy-subrc NE 0.
+    EXIT.
+  ENDIF.
+
+  SELECT * FROM /cellag/ord_add INTO TABLE gt_ord_add
+  WHERE qmnum IN s_qmnum AND
+        actualcommitdate IN gr_actualcommitdate AND
+        status IN s_statu AND
+        priority IN s_prior.
+
+
+  IF gv_auth_arch = abap_true.                              "HB071021
+    SELECT * FROM zord_add_archiv APPENDING TABLE gt_ord_add
+    WHERE qmnum IN s_qmnum AND
+          actualcommitdate IN gr_actualcommitdate AND
+          status IN s_statu AND
+          priority IN s_prior.
+  ENDIF.
+
+  SORT gt_ord_add BY qmnum fenum counter.
+
+  CLEAR gt_key. REFRESH gt_key.
+  CLEAR gt_ord_add.
+  LOOP AT gt_ord_add.
+    gt_key-qmnum = gt_ord_add-qmnum.
+    gt_key-fenum = gt_ord_add-fenum.
+    gt_key-counter = gt_ord_add-counter.
+    APPEND gt_key. CLEAR gt_key.
+  ENDLOOP.
+
+  SORT gt_key BY qmnum fenum counter.
+
+  IF NOT gt_key[] IS INITIAL.
+    DO.
+      build_table gt_key lt_key_par.
+      SELECT * FROM (gv_tabname) APPENDING TABLE gt_ordview
+      FOR ALL ENTRIES IN lt_key_par
+      WHERE qmnum EQ lt_key_par-qmnum AND
+            fenum EQ lt_key_par-fenum AND
+            counter EQ lt_key_par-counter AND
+            prozesstyp IN s_prozs AND
+            werks IN s_werks AND
+            otgrp IN s_otgrp AND
+            akz IN s_akz AND
+            skz IN s_skz AND
+            archivflag IN s_archi AND
+            orderstatecompl IN gr_orderstate AND
+            orderdate IN gr_orderdate AND
+            dateclosed IN gr_dateclosed AND
+            dockdate IN gr_dockdate AND
+            receivedate IN gr_receivedate AND
+            fastart IN gr_fastart AND
+            auftragsendesoll IN gr_auftragsendesoll AND
+            fanumber IN s_fanum AND
+            faend IN gr_faend AND
+            rsende IN gr_rsende AND
+            einlagerdate IN gr_einlagerdate AND
+            tat IN s_tat AND
+            overdue IN s_overd AND
+            aussonderung IN s_ausso AND
+            shipto IN s_kunwe AND
+            readytoship IN s_ready AND
+            deliverdate IN gr_deliverdate AND
+            vbeln IN s_vbeln AND
+            customergroup IN s_kdgrp AND
+            customergroupwe IN s_kdgwe AND
+            kundennummer IN s_kunag AND
+            prctr IN s_prctr AND
+            purchaseorder IN s_ebeln AND
+            purchaseorder2 IN s_ebel2 AND                   "HB031018
+            yliefvendvdat IN gr_vendordate AND              "HB190116
+            vendorrueck IN gr_vendorrueck AND
+            ctdisapmatnummer IN s_matnr AND
+            partnumberalc IN s_parta AND
+            techcode IN s_techc AND
+            systemdescr IN s_sydes AND
+            kundetechcode IN s_kutec AND
+            prodatt8 IN gr_outof AND
+            prodatt7 IN gr_highr AND
+            ps_psp_pnr IN s_pspnr AND                       "HB121213
+            wktnr IN s_wktnr      AND                       "MK040214
+            normt IN s_normt AND
+            hersteller IN s_mfrnr AND
+            serialmeld IN s_sernr AND
+            serialrec IN s_serrc AND
+            serialdeliver IN s_serlf AND
+            rechnummer IN s_faktu AND
+            orderdate  IN s_orddt AND                       "HB050217
+            fkstk      IN s_fkstk AND                       "MK281116
+            ymds       IN s_ymds.                           "HB251019
+
+      IF gv_auth_arch = abap_true.                          "HB071021
+        SELECT * FROM zordview_archiv APPENDING TABLE gt_ordview
+        FOR ALL ENTRIES IN lt_key_par
+        WHERE qmnum EQ lt_key_par-qmnum AND
+              fenum EQ lt_key_par-fenum AND
+              counter EQ lt_key_par-counter AND
+              prozesstyp IN s_prozs AND
+              werks IN s_werks AND
+              otgrp IN s_otgrp AND
+              akz IN s_akz AND
+              skz IN s_skz AND
+              archivflag IN s_archi AND
+              orderstatecompl IN gr_orderstate AND
+              orderdate IN gr_orderdate AND
+              dateclosed IN gr_dateclosed AND
+              dockdate IN gr_dockdate AND
+              receivedate IN gr_receivedate AND
+              fastart IN gr_fastart AND
+              auftragsendesoll IN gr_auftragsendesoll AND
+              fanumber IN s_fanum AND
+              faend IN gr_faend AND
+              rsende IN gr_rsende AND
+              einlagerdate IN gr_einlagerdate AND
+              tat IN s_tat AND
+              overdue IN s_overd AND
+              aussonderung IN s_ausso AND
+              shipto IN s_kunwe AND
+              readytoship IN s_ready AND
+              deliverdate IN gr_deliverdate AND
+              vbeln IN s_vbeln AND
+              customergroup IN s_kdgrp AND
+              customergroupwe IN s_kdgwe AND
+              kundennummer IN s_kunag AND
+              prctr IN s_prctr AND
+              purchaseorder IN s_ebeln AND
+              purchaseorder2 IN s_ebel2 AND                 "HB031018
+              yliefvendvdat IN gr_vendordate AND            "HB190116
+              vendorrueck IN gr_vendorrueck AND
+              ctdisapmatnummer IN s_matnr AND
+              partnumberalc IN s_parta AND
+              techcode IN s_techc AND
+              systemdescr IN s_sydes AND
+              kundetechcode IN s_kutec AND
+              prodatt8 IN gr_outof AND
+              prodatt7 IN gr_highr AND
+              ps_psp_pnr IN s_pspnr AND                     "HB121213
+              wktnr IN s_wktnr      AND                     "MK040214
+              normt IN s_normt AND
+              hersteller IN s_mfrnr AND
+              serialmeld IN s_sernr AND
+              serialrec IN s_serrc AND
+              serialdeliver IN s_serlf AND
+              rechnummer IN s_faktu AND
+              orderdate  IN s_orddt AND                     "HB050217
+              fkstk      IN s_fkstk AND                     "MK281116
+              ymds       IN s_ymds.                         "HB251019
+      ENDIF.
+
+    ENDDO.
+  ENDIF.
+
+  SORT gt_ordview BY qmnum fenum counter.
+
+  CLEAR lt_lifnr. REFRESH lt_lifnr.
+
+  CLEAR gt_ordview.
+  LOOP AT gt_ordview.
+    CHECK NOT gt_ordview-hersteller IS INITIAL.
+    lt_lifnr-lifnr = gt_ordview-hersteller.
+    COLLECT lt_lifnr.
+    CLEAR lt_lifnr.
+  ENDLOOP.
+
+  SORT lt_lifnr.
+  CLEAR gt_lfa1. REFRESH gt_lfa1.
+  IF NOT lt_lifnr[] IS INITIAL.
+    DO.
+      build_table lt_lifnr lt_lifnr_par.
+      SELECT lifnr name1 FROM lfa1
+      APPENDING TABLE gt_lfa1
+      FOR ALL ENTRIES IN lt_lifnr_par
+      WHERE lifnr = lt_lifnr_par-lifnr.
+    ENDDO.
+  ENDIF.
+
+  SORT gt_lfa1 BY lifnr.
+
+  CLEAR gt_ordview.
+  LOOP AT gt_ordview.
+    MOVE-CORRESPONDING gt_ordview TO gt_ord_full.
+    CLEAR gt_ord_add.
+    READ TABLE gt_ord_add WITH KEY qmnum = gt_ordview-qmnum
+                                   fenum = gt_ordview-fenum
+                                   counter = gt_ordview-counter
+    BINARY SEARCH.
+    IF sy-subrc EQ 0.
+      MOVE-CORRESPONDING gt_ord_add TO gt_ord_full.
+    ENDIF.
+    CLEAR gt_lfa1.
+    READ TABLE gt_lfa1 WITH KEY lifnr = gt_ordview-hersteller
+    BINARY SEARCH.
+    IF sy-subrc EQ 0.
+      gt_ord_full-herstellername = gt_lfa1-name1.
+    ENDIF.
+
+    "Gesamtnr mit Counter: zuerst in NUMC konvertieren
+    lv_cnt = gt_ord_full-counter.
+    CONCATENATE gt_ord_full-meldpos lv_cnt INTO gt_ord_full-qmnumposcnt. "HB230116
+
+    APPEND gt_ord_full.
+    CLEAR gt_ord_full.
+  ENDLOOP.
+
+ENDFORM.                    " GET_ORD_ADD_DATA
+*&---------------------------------------------------------------------*
+*&      Form  GET_ORDERVIEW_DATA
+*&---------------------------------------------------------------------*
+FORM get_orderview_data .
+
+  DATA: ls_ord_view TYPE /cellag/ordview.
+
+  DATA: BEGIN OF lt_lifnr OCCURS 0,
+          lifnr LIKE lfa1-lifnr,
+        END OF lt_lifnr.
+
+  DATA: lt_key_par   LIKE gt_key OCCURS 0 WITH HEADER LINE,
+        lt_lifnr_par LIKE lt_lifnr OCCURS 0 WITH HEADER LINE,
+        lv_cnt       TYPE felfd.
+
+  CLEAR gt_ordview. REFRESH gt_ordview.
+  CLEAR gt_ord_add. REFRESH gt_ord_add.
+  CLEAR gt_ord_full. REFRESH gt_ord_full.
+
+  SELECT SINGLE * FROM (gv_tabname)
+    INTO ls_ord_view
+  WHERE qmnum IN s_qmnum AND
+        prozesstyp IN s_prozs AND
+        werks IN s_werks AND
+        otgrp IN s_otgrp AND
+        qmart IN s_qmart AND                                "HB110713
+        akz IN s_akz AND
+        skz IN s_skz AND
+        archivflag IN s_archi AND
+        orderstatecompl IN gr_orderstate AND
+        orderdate IN gr_orderdate AND
+        dateclosed IN gr_dateclosed AND
+        dockdate IN gr_dockdate AND
+        receivedate IN gr_receivedate AND
+        fastart IN gr_fastart AND
+        auftragsendesoll IN gr_auftragsendesoll AND
+        fanumber IN s_fanum AND
+        faend IN gr_faend AND
+        rsende IN gr_rsende AND
+        einlagerdate IN gr_einlagerdate AND
+        tat IN s_tat AND
+        overdue IN s_overd AND
+        aussonderung IN s_ausso AND
+        shipto IN s_kunwe AND
+        readytoship IN s_ready AND
+        deliverdate IN gr_deliverdate AND
+        vbeln IN s_vbeln AND
+        customergroup IN s_kdgrp AND
+        customergroupwe IN s_kdgwe AND
+        kundennummer IN s_kunag AND
+        prctr IN s_prctr AND
+        purchaseorder IN s_ebeln AND
+        purchaseorder2 IN s_ebel2 AND                       "HB031018
+        yliefvendvdat IN gr_vendordate AND                  "HB190116
+        vendorrueck IN gr_vendorrueck AND
+        ctdisapmatnummer IN s_matnr AND
+        partnumberalc IN s_parta AND
+        techcode IN s_techc AND
+        systemdescr IN s_sydes AND
+        kundetechcode IN s_kutec AND
+        prodatt8 IN gr_outof AND
+        prodatt7 IN gr_highr AND
+            ps_psp_pnr IN s_pspnr AND                       "HB121213
+            wktnr IN s_wktnr      AND                       "MK040214
+        normt IN s_normt AND
+        hersteller IN s_mfrnr AND
+        serialmeld IN s_sernr AND
+        serialrec IN s_serrc AND
+        serialdeliver IN s_serlf AND
+        rechnummer IN s_faktu    AND
+        fkstk      IN s_fkstk    AND                        "MK281116
+        vendornummer IN s_vendo  AND                        "HB160715
+        partnumberin IN s_partin AND                        "HB160715
+        orderdate  IN s_orddt AND                           "HB050217
+        qmfe_usr08 IN s_usr08 AND                           "HB060514
+        ymds       IN s_ymds.                               "HB251019
+
+  IF sy-subrc NE 0.
+    IF gv_auth_arch = abap_true.                            "HB071021
+      SELECT SINGLE * FROM zordview_archiv
+      WHERE qmnum IN s_qmnum AND
+            prozesstyp IN s_prozs AND
+            werks IN s_werks AND
+            otgrp IN s_otgrp AND
+            qmart IN s_qmart AND                            "HB110713
+            akz IN s_akz AND
+            skz IN s_skz AND
+            archivflag IN s_archi AND
+            orderstatecompl IN gr_orderstate AND
+            orderdate IN gr_orderdate AND
+            dateclosed IN gr_dateclosed AND
+            dockdate IN gr_dockdate AND
+            receivedate IN gr_receivedate AND
+            fastart IN gr_fastart AND
+            auftragsendesoll IN gr_auftragsendesoll AND
+            fanumber IN s_fanum AND
+            faend IN gr_faend AND
+            rsende IN gr_rsende AND
+            einlagerdate IN gr_einlagerdate AND
+            tat IN s_tat AND
+            overdue IN s_overd AND
+            aussonderung IN s_ausso AND
+            shipto IN s_kunwe AND
+            readytoship IN s_ready AND
+            deliverdate IN gr_deliverdate AND
+            vbeln IN s_vbeln AND
+            customergroup IN s_kdgrp AND
+            customergroupwe IN s_kdgwe AND
+            kundennummer IN s_kunag AND
+            prctr IN s_prctr AND
+            purchaseorder IN s_ebeln AND
+            purchaseorder2 IN s_ebel2 AND                   "HB031018
+            yliefvendvdat IN gr_vendordate AND              "HB190116
+            vendorrueck IN gr_vendorrueck AND
+            ctdisapmatnummer IN s_matnr AND
+            partnumberalc IN s_parta AND
+            techcode IN s_techc AND
+            systemdescr IN s_sydes AND
+            kundetechcode IN s_kutec AND
+            prodatt8 IN gr_outof AND
+            prodatt7 IN gr_highr AND
+                ps_psp_pnr IN s_pspnr AND                   "HB121213
+                wktnr IN s_wktnr      AND                   "MK040214
+            normt IN s_normt AND
+            hersteller IN s_mfrnr AND
+            serialmeld IN s_sernr AND
+            serialrec IN s_serrc AND
+            serialdeliver IN s_serlf AND
+            rechnummer IN s_faktu    AND
+            fkstk      IN s_fkstk    AND                    "MK281116
+            vendornummer IN s_vendo  AND                    "HB160715
+            partnumberin IN s_partin AND                    "HB160715
+            orderdate  IN s_orddt AND                       "HB050217
+            qmfe_usr08 IN s_usr08 AND                       "HB060514
+            ymds       IN s_ymds.                           "HB251019
+      IF sy-subrc NE 0.
+        EXIT.
+      ENDIF.
+    ENDIF.
+  ENDIF.
+
+  SELECT * FROM (gv_tabname) INTO TABLE gt_ordview
+  WHERE qmnum IN s_qmnum AND
+        prozesstyp IN s_prozs AND
+        werks IN s_werks AND
+        otgrp IN s_otgrp AND
+        qmart IN s_qmart AND                                "HB110713
+        akz IN s_akz AND
+        skz IN s_skz AND
+        archivflag IN s_archi AND
+        orderstatecompl IN gr_orderstate AND
+        orderdate IN gr_orderdate AND
+        dateclosed IN gr_dateclosed AND
+        dockdate IN gr_dockdate AND
+        receivedate IN gr_receivedate AND
+        fastart IN gr_fastart AND
+        auftragsendesoll IN gr_auftragsendesoll AND
+        fanumber IN s_fanum AND
+        faend IN gr_faend AND
+        rsende IN gr_rsende AND
+        einlagerdate IN gr_einlagerdate AND
+        tat IN s_tat AND
+        overdue IN s_overd AND
+        aussonderung IN s_ausso AND
+        shipto IN s_kunwe AND
+        readytoship IN s_ready AND
+        deliverdate IN gr_deliverdate AND
+        vbeln IN s_vbeln AND
+        customergroup IN s_kdgrp AND
+        customergroupwe IN s_kdgwe AND
+        kundennummer IN s_kunag AND
+        prctr IN s_prctr AND
+        purchaseorder IN s_ebeln AND
+        purchaseorder2 IN s_ebel2 AND                       "HB031018
+        yliefvendvdat IN gr_vendordate AND                  "HB190116
+        vendorrueck IN gr_vendorrueck AND
+        ctdisapmatnummer IN s_matnr AND
+        partnumberalc IN s_parta AND
+        techcode IN s_techc AND
+        systemdescr IN s_sydes AND
+        kundetechcode IN s_kutec AND
+        prodatt8 IN gr_outof AND
+        prodatt7 IN gr_highr AND
+            ps_psp_pnr IN s_pspnr AND                       "HB121213
+            wktnr IN s_wktnr      AND                       "MK040214
+        normt IN s_normt AND
+        hersteller IN s_mfrnr AND
+        serialmeld IN s_sernr AND
+        serialrec IN s_serrc AND
+        serialdeliver IN s_serlf AND
+        rechnummer IN s_faktu    AND
+        fkstk      IN s_fkstk    AND                        "MK281116
+        vendornummer IN s_vendo  AND                        "HB160715
+        partnumberin IN s_partin AND                        "HB160715
+        orderdate  IN s_orddt AND                           "HB050217
+        qmfe_usr08 IN s_usr08 AND                           "HB060514
+        ymds       IN s_ymds.                               "HB251019
+
+  IF gv_auth_arch = abap_true.                              "HB071021
+    SELECT * FROM zordview_archiv APPENDING TABLE gt_ordview
+    WHERE qmnum IN s_qmnum AND
+          prozesstyp IN s_prozs AND
+          werks IN s_werks AND
+          otgrp IN s_otgrp AND
+          qmart IN s_qmart AND                              "HB110713
+          akz IN s_akz AND
+          skz IN s_skz AND
+          archivflag IN s_archi AND
+          orderstatecompl IN gr_orderstate AND
+          orderdate IN gr_orderdate AND
+          dateclosed IN gr_dateclosed AND
+          dockdate IN gr_dockdate AND
+          receivedate IN gr_receivedate AND
+          fastart IN gr_fastart AND
+          auftragsendesoll IN gr_auftragsendesoll AND
+          fanumber IN s_fanum AND
+          faend IN gr_faend AND
+          rsende IN gr_rsende AND
+          einlagerdate IN gr_einlagerdate AND
+          tat IN s_tat AND
+          overdue IN s_overd AND
+          aussonderung IN s_ausso AND
+          shipto IN s_kunwe AND
+          readytoship IN s_ready AND
+          deliverdate IN gr_deliverdate AND
+          vbeln IN s_vbeln AND
+          customergroup IN s_kdgrp AND
+          customergroupwe IN s_kdgwe AND
+          kundennummer IN s_kunag AND
+          prctr IN s_prctr AND
+          purchaseorder IN s_ebeln AND
+          purchaseorder2 IN s_ebel2 AND                     "HB031018
+          yliefvendvdat IN gr_vendordate AND                "HB190116
+          vendorrueck IN gr_vendorrueck AND
+          ctdisapmatnummer IN s_matnr AND
+          partnumberalc IN s_parta AND
+          techcode IN s_techc AND
+          systemdescr IN s_sydes AND
+          kundetechcode IN s_kutec AND
+          prodatt8 IN gr_outof AND
+          prodatt7 IN gr_highr AND
+              ps_psp_pnr IN s_pspnr AND                     "HB121213
+              wktnr IN s_wktnr      AND                     "MK040214
+          normt IN s_normt AND
+          hersteller IN s_mfrnr AND
+          serialmeld IN s_sernr AND
+          serialrec IN s_serrc AND
+          serialdeliver IN s_serlf AND
+          rechnummer IN s_faktu    AND
+          fkstk      IN s_fkstk    AND                      "MK281116
+          vendornummer IN s_vendo  AND                      "HB160715
+          partnumberin IN s_partin AND                      "HB160715
+          orderdate  IN s_orddt AND                         "HB050217
+          qmfe_usr08 IN s_usr08 AND                         "HB060514
+          ymds       IN s_ymds.                             "HB251019
+  ENDIF.
+
+  SORT gt_ordview BY qmnum fenum counter.
+
+  IF gv_auth_arch = abap_true.                              "HB071021
+    "Dubletten kann es nach Zugriff auf Archivierungstabelle geben
+    DELETE ADJACENT DUPLICATES FROM gt_ordview COMPARING qmnum fenum counter.  "keine Dubletten
+  ENDIF.
+  CLEAR lt_lifnr. REFRESH lt_lifnr.
+  CLEAR gt_key. REFRESH gt_key.
+  CLEAR gt_ordview.
+  LOOP AT gt_ordview.
+    gt_key-qmnum = gt_ordview-qmnum.
+    gt_key-fenum = gt_ordview-fenum.
+    gt_key-counter = gt_ordview-counter.
+    APPEND gt_key. CLEAR gt_key.
+    IF NOT gt_ordview-hersteller IS INITIAL.
+      lt_lifnr-lifnr = gt_ordview-hersteller.
+      COLLECT lt_lifnr.
+      CLEAR lt_lifnr.
+    ENDIF.
+  ENDLOOP.
+
+  SORT gt_key BY qmnum fenum counter.
+
+  IF NOT gt_key[] IS INITIAL.
+    DO.
+      build_table gt_key lt_key_par.
+      SELECT * FROM /cellag/ord_add APPENDING TABLE gt_ord_add
+      FOR ALL ENTRIES IN lt_key_par
+      WHERE qmnum = lt_key_par-qmnum AND
+            fenum = lt_key_par-fenum AND
+            counter = lt_key_par-counter AND
+            actualcommitdate IN gr_actualcommitdate AND
+            status IN s_statu AND
+            priority IN s_prior.
+      IF gv_auth_arch = abap_true.                          "HB071021
+        SELECT * FROM zord_add_archiv APPENDING TABLE gt_ord_add
+        FOR ALL ENTRIES IN lt_key_par
+        WHERE qmnum = lt_key_par-qmnum AND
+              fenum = lt_key_par-fenum AND
+              counter = lt_key_par-counter AND
+              actualcommitdate IN gr_actualcommitdate AND
+              status IN s_statu AND
+              priority IN s_prior.
+
+      ENDIF.
+    ENDDO.
+  ENDIF.
+
+  SORT lt_lifnr.
+  CLEAR gt_lfa1. REFRESH gt_lfa1.
+  IF NOT lt_lifnr[] IS INITIAL.
+    DO.
+      build_table lt_lifnr lt_lifnr_par.
+      SELECT lifnr name1 FROM lfa1
+      APPENDING TABLE gt_lfa1
+      FOR ALL ENTRIES IN lt_lifnr_par
+      WHERE lifnr = lt_lifnr_par-lifnr.
+    ENDDO.
+  ENDIF.
+
+  SORT gt_lfa1 BY lifnr.
+
+  SORT gt_ord_add BY qmnum fenum counter.
+
+  CLEAR gt_ordview.
+  LOOP AT gt_ordview.
+    MOVE-CORRESPONDING gt_ordview TO gt_ord_full.
+    CLEAR gt_ord_add.
+    READ TABLE gt_ord_add WITH KEY qmnum = gt_ordview-qmnum
+                                   fenum = gt_ordview-fenum
+                                   counter = gt_ordview-counter
+    BINARY SEARCH.
+    IF sy-subrc EQ 0.
+      MOVE-CORRESPONDING gt_ord_add TO gt_ord_full.
+    ENDIF.
+    CLEAR gt_lfa1.
+    READ TABLE gt_lfa1 WITH KEY lifnr = gt_ordview-hersteller
+    BINARY SEARCH.
+    IF sy-subrc EQ 0.
+      gt_ord_full-herstellername = gt_lfa1-name1.
+    ENDIF.
+
+    "Gesamtnr mit Counter: zuerst in NUMC konvertieren
+    lv_cnt = gt_ord_full-counter.
+    CONCATENATE gt_ord_full-meldpos lv_cnt INTO gt_ord_full-qmnumposcnt. "HB230116
+
+    APPEND gt_ord_full.
+    CLEAR gt_ord_full.
+  ENDLOOP.
+ENDFORM.                    " GET_ORDERVIEW_DATA
+*&---------------------------------------------------------------------*
+*&      Form  BUILD_MERKMAL_RANGES
+*&---------------------------------------------------------------------*
+FORM build_merkmal_ranges .
+  CLEAR gr_highr. REFRESH gr_highr.
+  CLEAR gr_outof. REFRESH gr_outof.
+  CLEAR gr_orderstate. REFRESH gr_orderstate.
+
+  IF NOT pa_highr IS INITIAL.
+    gr_highr-sign = 'I'.
+    gr_highr-option = 'EQ'.
+    gr_highr-low = c_true.
+    APPEND gr_highr.
+    CLEAR gr_highr.
+  ENDIF.
+
+  IF NOT pa_outof IS INITIAL.
+    gr_outof-sign = 'I'.
+    gr_outof-option = 'EQ'.
+    gr_outof-low = c_true.
+    APPEND gr_outof.
+    CLEAR gr_outof.
+  ENDIF.
+
+  IF NOT pa_open IS INITIAL.
+    gr_orderstate-sign = 'I'.
+    gr_orderstate-option = 'EQ'.
+    gr_orderstate-low = c_open.
+    APPEND gr_orderstate.
+    CLEAR gr_orderstate.
+  ENDIF.
+
+  IF NOT pa_clos IS INITIAL.
+    gr_orderstate-sign = 'I'.
+    gr_orderstate-option = 'EQ'.
+    gr_orderstate-low = c_closed.
+    APPEND gr_orderstate.
+    CLEAR gr_orderstate.
+  ENDIF.
+
+  IF NOT pa_dele IS INITIAL.
+    gr_orderstate-sign = 'I'.
+    gr_orderstate-option = 'EQ'.
+    gr_orderstate-low = c_deleted.
+    APPEND gr_orderstate.
+    CLEAR gr_orderstate.
+  ENDIF.
+ENDFORM.                    " BUILD_MERKMAL_RANGES
+*&---------------------------------------------------------------------*
+*&      Form  FCODE_DETAIL_ALV
+*&---------------------------------------------------------------------*
+FORM fcode_detail_alv USING if_selfield TYPE slis_selfield.
+  DATA: lt_fieldcat_aux     TYPE slis_t_fieldcat_alv,
+        lwa_fieldcat_aux    TYPE slis_fieldcat_alv,
+        lt_fieldcat_detail  TYPE slis_t_fieldcat_alv,
+        lwa_fieldcat_detail TYPE slis_fieldcat_alv,
+        lwa_layout_detail   TYPE slis_layout_alv.
+
+  DATA: lt_dfies LIKE dfies OCCURS 0 WITH HEADER LINE.
+
+  DATA: lv_index    TYPE i,
+        lv_len      TYPE i,
+        lv_selected TYPE i.
+
+  FIELD-SYMBOLS: <field>     TYPE any,
+                 <wa_detail> LIKE gt_detail.
+
+
+  IF NOT if_selfield-endsum IS INITIAL OR
+     NOT if_selfield-sumindex = 0.
+* Error message
+    MESSAGE i000(/cellag/messages_sd) WITH TEXT-e01.
+    EXIT.
+  ENDIF.
+
+  CLEAR lv_selected.
+  CLEAR gt_ord_full.
+  LOOP AT gt_ord_full WHERE selected EQ c_true.
+    lv_selected = lv_selected + 1.
+    IF lv_selected GE 2.
+      EXIT.
+    ENDIF.
+  ENDLOOP.
+
+  IF lv_selected GT 1.
+* Error message
+    MESSAGE i000(/cellag/messages_sd) WITH TEXT-e02.
+    EXIT.
+  ENDIF.
+
+  CLEAR gt_ord_full.
+  READ TABLE gt_ord_full INDEX if_selfield-tabindex.
+  IF sy-subrc NE 0.
+* Error message
+    MESSAGE i000(/cellag/messages_sd) WITH TEXT-e01.
+    EXIT.
+  ENDIF.
+
+  CLEAR lt_fieldcat_aux. REFRESH lt_fieldcat_aux.
+  CALL FUNCTION 'REUSE_ALV_GRID_LAYOUT_INFO_GET'
+    IMPORTING
+      et_fieldcat   = lt_fieldcat_aux
+    EXCEPTIONS
+      no_infos      = 1
+      program_error = 2
+      OTHERS        = 3.
+
+  CLEAR gt_detail. REFRESH gt_detail.
+  CLEAR lwa_fieldcat_aux.
+  LOOP AT lt_fieldcat_aux INTO lwa_fieldcat_aux.
+    MOVE-CORRESPONDING lwa_fieldcat_aux TO gt_detail.
+    gt_detail-scrtext_l = lwa_fieldcat_aux-seltext_l.
+    APPEND gt_detail.
+    CLEAR gt_detail.
+  ENDLOOP.
+
+  CLEAR lt_dfies. REFRESH lt_dfies.
+  CALL FUNCTION 'DDIF_NAMETAB_GET'
+    EXPORTING
+      tabname   = '/CELLAG/ORD_FULL'
+    TABLES
+      dfies_tab = lt_dfies
+    EXCEPTIONS
+      not_found = 1
+      OTHERS    = 2.
+
+  CLEAR: lv_index,
+         lv_len.
+
+  DESCRIBE TABLE lt_fieldcat_aux LINES lv_len.
+
+  lv_index = 1.
+
+  DO lv_len TIMES.
+    ADD 1 TO lv_index.
+    ASSIGN COMPONENT lv_index OF STRUCTURE gt_ord_full TO <field>.
+    CLEAR lt_dfies.
+    READ TABLE lt_dfies INDEX sy-index.
+    IF sy-subrc EQ 0.
+      CLEAR gt_detail.
+      READ TABLE gt_detail WITH KEY fieldname = lt_dfies-fieldname
+      ASSIGNING <wa_detail>.
+      WRITE <field> TO <wa_detail>-value LEFT-JUSTIFIED.
+    ENDIF.
+  ENDDO.
+
+  DELETE gt_detail WHERE no_out = c_true.
+  SORT gt_detail BY col_pos.
+
+  CLEAR lt_fieldcat_detail. REFRESH lt_fieldcat_detail.
+  CALL FUNCTION 'REUSE_ALV_FIELDCATALOG_MERGE'
+    EXPORTING
+      i_program_name         = gv_repid
+      i_structure_name       = '/CELLAG/DETAIL'
+    CHANGING
+      ct_fieldcat            = lt_fieldcat_detail[]
+    EXCEPTIONS
+      inconsistent_interface = 1
+      program_error          = 2
+      OTHERS                 = 3.
+  IF sy-subrc <> 0.
+  ENDIF.
+
+  CLEAR lwa_fieldcat_detail.
+  LOOP AT lt_fieldcat_detail INTO lwa_fieldcat_detail.
+    CASE lwa_fieldcat_detail-fieldname.
+      WHEN 'FIELDNAME' OR 'NO_OUT' OR 'COL_POS'.
+        lwa_fieldcat_detail-no_out = c_true.
+        MODIFY lt_fieldcat_detail FROM lwa_fieldcat_detail INDEX sy-tabix.
+    ENDCASE.
+  ENDLOOP.
+
+  CLEAR lwa_layout_detail.
+  lwa_layout_detail-colwidth_optimize = c_true.
+  lwa_layout_detail-zebra = c_true.
+  lwa_layout_detail-window_titlebar = TEXT-t00.
+
+  CALL FUNCTION 'REUSE_ALV_GRID_DISPLAY'
+    EXPORTING
+      i_callback_program = gv_repid
+      is_layout          = lwa_layout_detail
+      it_fieldcat        = lt_fieldcat_detail[]
+      i_default          = ' '
+      i_save             = 'A'
+    TABLES
+      t_outtab           = gt_detail[]
+    EXCEPTIONS
+      program_error      = 1
+      OTHERS             = 2.
+
+ENDFORM.                    " FCODE_DETAIL_ALV
+*&---------------------------------------------------------------------*
+*&      Form  FCODE_DISP_DATA
+*&---------------------------------------------------------------------*
+FORM fcode_disp_data USING if_selfield TYPE slis_selfield.
+
+  DATA: lv_selected TYPE i.
+
+  IF NOT if_selfield-endsum IS INITIAL OR
+     NOT if_selfield-sumindex = 0.
+* Error message
+    MESSAGE i000(/cellag/messages_sd) WITH TEXT-e01.
+    EXIT.
+  ENDIF.
+
+  CLEAR lv_selected.
+  CLEAR gt_ord_full.
+  LOOP AT gt_ord_full WHERE selected EQ c_true.
+    lv_selected = lv_selected + 1.
+    IF lv_selected GE 2.
+      EXIT.
+    ENDIF.
+  ENDLOOP.
+
+  IF lv_selected GT 1.
+* Error message
+    MESSAGE i000(/cellag/messages_sd) WITH TEXT-e02.
+    EXIT.
+  ENDIF.
+
+  CLEAR gt_ord_full.
+  READ TABLE gt_ord_full INDEX if_selfield-tabindex.
+  IF sy-subrc NE 0.
+* Error message
+    MESSAGE i000(/cellag/messages_sd) WITH TEXT-e01.
+    EXIT.
+  ENDIF.
+
+  CLEAR gt_ord_add.
+  READ TABLE gt_ord_add WITH KEY qmnum = gt_ord_full-qmnum
+                                 fenum = gt_ord_full-fenum
+                                 counter = gt_ord_full-counter
+  BINARY SEARCH.
+  IF sy-subrc NE 0.
+* Error message
+    MESSAGE i000(/cellag/messages_sd) WITH TEXT-e03.
+    EXIT.
+  ENDIF.
+
+  "HB260113 wieder zurückgenommen, da nicht fertiggestellt/getestet
+**===========================================================
+** Start of Insertation  CAGGERWAS 14.08.2012
+**===========================================================
+*  DATA: lv_change VALUE space.
+*
+*  CLEAR gt_outtab.
+*
+*  CALL FUNCTION '/CELLAG/DISP_COMMENT'
+*    EXPORTING
+*      im_qunum_z2 = gt_ord_full-qmnum_z2
+*      im_change   = lv_change
+*    TABLES
+*      et_qmma     = gt_outtab.
+
+
+  CALL SCREEN 0300 STARTING AT 2 2.
+*===========================================================
+* End of Insertation  CAGGERWAS 14.08.2012
+*===========================================================
+ENDFORM.                    " FCODE_DISP_DATA
+*&---------------------------------------------------------------------*
+*&      Form  GET_GENERAL_DATA
+*&---------------------------------------------------------------------*
+FORM get_general_data .
+  RANGES: lr_katalogart FOR qpct-katalogart.
+
+  CLEAR gt_tq80. REFRESH gt_tq80.
+  SELECT * FROM tq80 INTO TABLE gt_tq80
+  WHERE ( qmart = 'Z1' OR qmart = 'Z2' ).
+  SORT gt_tq80.
+
+  CLEAR lr_katalogart. REFRESH lr_katalogart.
+  lr_katalogart-sign = 'I'.
+  lr_katalogart-option = 'EQ'.
+
+  CLEAR gt_tq80.
+  LOOP AT gt_tq80.
+    lr_katalogart-low = gt_tq80-fekat.
+    COLLECT lr_katalogart.
+    lr_katalogart-low = gt_tq80-mfkat.
+    COLLECT lr_katalogart.
+    lr_katalogart-low = gt_tq80-otkat.
+    COLLECT lr_katalogart.
+  ENDLOOP.
+  CLEAR lr_katalogart.
+  SORT lr_katalogart.
+
+  CLEAR gt_qpct. REFRESH gt_qpct.
+  SELECT katalogart codegruppe code kurztext FROM qpct INTO TABLE gt_qpct
+   WHERE katalogart IN lr_katalogart AND
+   sprache = sy-langu.
+
+  CLEAR gt_qpgt. REFRESH gt_qpgt.
+  SELECT katalogart codegruppe kurztext FROM qpgt INTO TABLE gt_qpgt
+    WHERE katalogart IN lr_katalogart AND
+    sprache = sy-langu.
+
+  SORT gt_qpct BY katalogart codegruppe code.
+  SORT gt_qpgt BY katalogart codegruppe.
+
+ENDFORM.                    " GET_GENERAL_DATA
+*&---------------------------------------------------------------------*
+*&      Form  FCODE_PICK_ALV
+*&---------------------------------------------------------------------*
+FORM fcode_pick_alv USING if_selfield TYPE slis_selfield.
+  IF NOT if_selfield-endsum IS INITIAL OR
+     NOT if_selfield-sumindex = 0.
+* Error message
+    MESSAGE i000(/cellag/messages_sd) WITH TEXT-e01.
+  ENDIF.
+
+  CLEAR gt_ord_full.
+  READ TABLE gt_ord_full INDEX if_selfield-tabindex.
+  CHECK sy-subrc = 0.
+
+  CASE if_selfield-fieldname.
+
+* Meldungsnummer
+    WHEN 'QMNUM'.
+      CHECK NOT gt_ord_full-qmnum IS INITIAL.
+      SET PARAMETER ID 'IQM' FIELD gt_ord_full-qmnum.
+      CALL TRANSACTION 'IW53' AND SKIP FIRST SCREEN.
+* Materialnr
+    WHEN 'CTDISAPMATNUMMER'.
+      CHECK NOT gt_ord_full-ctdisapmatnummer IS INITIAL.
+      SET PARAMETER ID 'MAT' FIELD gt_ord_full-ctdisapmatnummer.
+      CALL TRANSACTION 'MM03' AND SKIP FIRST SCREEN.
+* Fertigungsauftrag
+    WHEN 'FANUMBER'.
+      CHECK NOT gt_ord_full-fanumber IS INITIAL.
+      SET PARAMETER ID 'ANR' FIELD gt_ord_full-fanumber.
+      CALL TRANSACTION 'IW33' AND SKIP FIRST SCREEN.
+* Lieferung
+    WHEN 'DELNOTENUMBER'.
+      CHECK NOT gt_ord_full-delnotenumber IS INITIAL.
+      SET PARAMETER ID 'VL' FIELD gt_ord_full-delnotenumber.
+      CALL TRANSACTION 'VL03N' AND SKIP FIRST SCREEN.
+* Bestellung
+    WHEN 'PURCHASENUMBER'.
+      CHECK NOT gt_ord_full-purchasenumber IS INITIAL.
+      SET PARAMETER ID 'BES' FIELD gt_ord_full-purchasenumber.
+      CALL TRANSACTION 'ME23N' AND SKIP FIRST SCREEN.
+* Kundenauftrag
+    WHEN 'VBELN'.
+      CHECK NOT gt_ord_full-vbeln IS INITIAL.
+      SET PARAMETER ID 'AUN' FIELD gt_ord_full-vbeln.
+      CALL TRANSACTION 'VA03' AND SKIP FIRST SCREEN.
+* Retoure
+    WHEN 'RETOURE'.
+      CHECK NOT gt_ord_full-retoure IS INITIAL.
+      SET PARAMETER ID 'VL' FIELD gt_ord_full-retoure.
+      CALL TRANSACTION 'VL03N' AND SKIP FIRST SCREEN.
+* Rechnung
+    WHEN 'RECHNUMMER'.
+      CHECK NOT gt_ord_full-rechnummer IS INITIAL.
+      SET PARAMETER ID 'VF' FIELD gt_ord_full-rechnummer.
+      CALL TRANSACTION 'VF03' AND SKIP FIRST SCREEN.
+* Equipment
+    WHEN 'EQUIPMENTNUMMER'.
+      CHECK NOT gt_ord_full-equipmentnummer IS INITIAL.
+      SET PARAMETER ID 'SER' FIELD gt_ord_full-equipmentnummer.
+      CALL TRANSACTION 'IQ03' AND SKIP FIRST SCREEN.
+* Kunde
+    WHEN 'KUNDENNUMMER'.
+      CHECK NOT gt_ord_full-kundennummer IS INITIAL.
+      SET PARAMETER ID 'KUN' FIELD gt_ord_full-kundennummer.
+      CALL TRANSACTION 'XD03' AND SKIP FIRST SCREEN.      "#EC CI_USAGE_OK[2265093]    "INS S4CONV ECC - HPC(2508-614)
+* Warenempfänger
+    WHEN 'SHIPTO'.
+      CHECK NOT gt_ord_full-shipto IS INITIAL.
+      SET PARAMETER ID 'KUN' FIELD gt_ord_full-shipto.
+      SET PARAMETER ID 'VKO' FIELD gt_ord_full-vkorg.
+      SET PARAMETER ID 'VTW' FIELD gt_ord_full-vtweg.
+      SET PARAMETER ID 'SPA' FIELD gt_ord_full-spart.
+      CALL TRANSACTION 'XD03' AND SKIP FIRST SCREEN.      "#EC CI_USAGE_OK[2265093]    "INS S4CONV ECC - HPC(2508-614)
+* Vendor
+    WHEN 'VENDORNUMMER'.
+      CHECK NOT gt_ord_full-vendornummer IS INITIAL.
+      SET PARAMETER ID 'LIF' FIELD gt_ord_full-vendornummer.
+      CALL TRANSACTION 'XK03'.      "#EC CI_USAGE_OK[2265093]    "INS S4CONV ECC - HPC(2508-614)
+* Hersteller
+    WHEN 'HERSTELLER'.
+      CHECK NOT gt_ord_full-hersteller IS INITIAL.
+      SET PARAMETER ID 'LIF' FIELD gt_ord_full-hersteller.
+      CALL TRANSACTION 'XK03'.      "#EC CI_USAGE_OK[2265093]    "INS S4CONV ECC - HPC(2508-614)
+
+* Z2 Meldung                                                         "HB290514
+    WHEN 'QMNUM_Z2'.
+      CHECK NOT gt_ord_full-qmnum_z2 IS INITIAL.
+      SET PARAMETER ID 'IQM' FIELD gt_ord_full-qmnum_z2.
+      CALL TRANSACTION 'IW53' AND SKIP FIRST SCREEN.
+
+* Vendorlieferung                                                    "HB290514
+    WHEN 'YLIEFVEND'.
+      CHECK NOT gt_ord_full-yliefvend IS INITIAL.
+      SET PARAMETER ID 'VL' FIELD gt_ord_full-yliefvend.
+      CALL TRANSACTION 'VL03N' AND SKIP FIRST SCREEN.
+
+    WHEN OTHERS.
+
+  ENDCASE.
+ENDFORM.                    " FCODE_PICK_ALV
+*&---------------------------------------------------------------------*
+*&      Form  FCODE_CHANGE_DATA
+*&---------------------------------------------------------------------*
+FORM fcode_change_data USING if_selfield TYPE slis_selfield.
+
+  DATA: lwa_objk LIKE objk.
+
+  DATA: lv_selected TYPE i.
+* Start of Insertation  CAGGERWAS 22.08.2012
+*        lv_viele    TYPE i.
+* End of Insertation  CAGGERWAS 22.08.2012
+
+  DATA: lv_qmnum      LIKE qmel-qmnum,
+        lv_obknr      LIKE afih-obknr,
+        lv_equnr      LIKE objk-equnr,
+        lv_lines(3)   TYPE i,
+        lv_index_objk TYPE sytabix.
+
+  DATA: BEGIN OF lt_qmel OCCURS 0,
+          qmnum    LIKE qmel-qmnum,
+          serialnr LIKE qmel-serialnr,
+        END OF lt_qmel.
+
+  DATA: BEGIN OF lt_qmnum OCCURS 0,
+          qmnum LIKE qmel-qmnum,
+        END OF lt_qmnum.
+
+  DATA: BEGIN OF lt_ordview_equnr OCCURS 0,
+          equnr LIKE objk-equnr,
+        END OF lt_ordview_equnr.
+
+  DATA: lt_objk_equnr LIKE gt_objk OCCURS 0 WITH HEADER LINE.
+
+  DATA:
+    lv_fa_exist     TYPE abap_bool,  "Fertigungsauftrag ist vorhanden
+    lv_ordadd_exist TYPE abap_bool,  "Satz ORD_ADD angelegt
+    lv_answer       TYPE c,
+    ls_ord_full     TYPE /cellag/ord_full.
+
+  IF NOT if_selfield-endsum IS INITIAL OR
+     NOT if_selfield-sumindex = 0.
+* Error message
+    MESSAGE i000(/cellag/messages_sd) WITH TEXT-e01.  "Kein Eintrag wurde selektiert
+    EXIT.
+  ENDIF.
+* Start of Insertation  CAGGERWAS 22.08.2012
+*  CLEAR lv_viele.
+* End of Insertation  CAGGERWAS 22.08.2012
+  CLEAR lv_selected.
+  CLEAR gt_ord_full.
+* Start of Insertation  CAGGERWAS 22.08.2012
+*  CLEAR gt_ord_viele.
+*  REFRESH gt_ord_viele[].
+* End of Insertation  CAGGERWAS 22.08.2012
+  LOOP AT gt_ord_full WHERE selected EQ c_true.
+** Start of Insertation  CAGGERWAS 22.08.2012
+*    lv_viele = lv_viele + 1.
+
+    "auch ohne FANUMBER möglich  HB021123; Kommentare auch bei Z1
+*    IF gt_ord_full-fanumber IS NOT INITIAL.
+*      MOVE-CORRESPONDING gt_ord_full TO gs_ord_viele.
+*      APPEND gs_ord_viele TO gt_ord_viele[].
+    lv_selected = lv_selected + 1.
+*    ENDIF.
+    IF lv_selected GE 2.
+      EXIT.
+    ENDIF.
+** End of Insertation  CAGGERWAS 22.08.2012
+  ENDLOOP.
+* Start of Insertation  CAGGERWAS 22.08.2012
+  IF lv_selected EQ 0.
+* Error message
+    MESSAGE i000(/cellag/messages_sd) WITH TEXT-e01.  "Kein Eintrag wurde selektiert
+    EXIT.
+  ENDIF.
+* wenn mehrere Zeilen markiert wurden auf dem ALV
+* Aufruf neuer Fuba mit Übergabe der internen Tabelle gt_ord_viele[]
+*  IF lv_viele GT 1.
+*
+*    CALL FUNCTION '/CELLAG/SAVE_COMMENT'
+*      TABLES
+*        et_ord_viele = gt_ord_viele.
+** outtab aktualisieren
+*    EXIT.
+*  ENDIF.
+* End of Insertation  CAGGERWAS 22.08.2012
+
+
+  CLEAR gt_ord_full.
+  READ TABLE gt_ord_full INDEX if_selfield-tabindex.
+  IF sy-subrc NE 0.
+* Error message
+    MESSAGE i000(/cellag/messages_sd) WITH TEXT-e01.  "Kein Eintrag wurde selektiert
+    EXIT.
+  ENDIF.
+
+  "--------------------------------------------------------------
+  " Prüfen der Datenlase
+  " - ORD_ADD existiert?
+  " - Fertigungsauftrag vorhanden?
+  "--------------------------------------------------------------
+  CLEAR: gt_ord_add.
+
+  IF gt_ord_full-fanumber IS INITIAL.
+    lv_fa_exist = abap_false.  "Fertigungsauftrag ist vorhanden
+  ELSE.
+    lv_fa_exist = abap_true.
+  ENDIF.
+
+  READ TABLE gt_ord_add WITH KEY qmnum = gt_ord_full-qmnum
+                                 fenum = gt_ord_full-fenum
+                                 counter = gt_ord_full-counter
+  BINARY SEARCH.
+  IF sy-subrc <> 0.
+    lv_ordadd_exist = abap_false.
+  ELSE.
+    lv_ordadd_exist = abap_true.
+  ENDIF.
+
+  "Entscheidung über Abfrage Customizing-Tabelle oder Popup
+  CALL METHOD zcl_orderview=>decide_main_or_z2
+    EXPORTING
+      iv_vbeln  = gt_ord_full-vbeln
+      iv_posnr  = gt_ord_full-posnr
+      iv_otgrp  = gt_ord_full-otgrp
+      iv_werks  = gt_ord_full-werks
+    RECEIVING
+      rs_answer = lv_answer.
+
+  IF lv_answer = 'C'.  "Cancel
+    EXIT.  "Abbruch raus
+  ENDIF.
+
+
+
+  IF lv_answer = '2'.
+
+    "--------------------------------------------------------------
+    " Anlegen/Ändern zu Z2
+    "--------------------------------------------------------------
+*    IF lv_ordadd_exist = abap_false.
+    "der ORD_ADD Eintrag existiert bereits  (auf der Hauptmeldung wurde Kommentar angelegt)
+
+* Can we create a service notice?
+    IF lv_fa_exist = abap_false.
+* Error message-->Service notice cannot be created
+      MESSAGE i000(/cellag/messages_sd) WITH TEXT-e04.  "Es wurde kein Fertigungsauftrag gefunden
+      EXIT.
+    ENDIF.
+
+    CLEAR lv_obknr.
+    SELECT SINGLE obknr FROM afih INTO lv_obknr
+    WHERE aufnr = gt_ord_full-fanumber.
+    CHECK NOT lv_obknr IS INITIAL.
+
+    CLEAR gt_objk. REFRESH gt_objk.
+    SELECT * FROM objk INTO TABLE gt_objk WHERE obknr = lv_obknr AND
+                                                objvw = 'A'.
+
+    CLEAR lv_lines.
+    DESCRIBE TABLE gt_objk LINES lv_lines.
+    IF lv_lines IS INITIAL.
+* Error
+      MESSAGE i000(/cellag/messages_sd) WITH TEXT-e08.  "Der CS-Auftrag hat keine Objkektliste
+      EXIT.
+    ENDIF.
+
+    CLEAR lt_qmnum. REFRESH lt_qmnum.
+    CLEAR gt_objk.
+    LOOP AT gt_objk.
+      IF NOT gt_objk-ihnum IS INITIAL.
+        lt_qmnum-qmnum = gt_objk-ihnum.
+        COLLECT lt_qmnum.
+        CLEAR lt_qmnum.
+      ENDIF.
+    ENDLOOP.
+
+    SORT lt_qmnum.
+    CLEAR lt_qmel. REFRESH lt_qmel.
+    IF NOT lt_qmnum[] IS INITIAL.
+      SELECT qmnum serialnr FROM qmel INTO TABLE lt_qmel
+      FOR ALL ENTRIES IN lt_qmnum
+      WHERE qmnum = lt_qmnum-qmnum.
+    ENDIF.
+
+    SORT lt_qmel.
+
+    CLEAR gt_objk.
+    LOOP AT gt_objk.
+      IF NOT gt_objk-ihnum IS INITIAL.
+        CLEAR lt_qmel.
+        READ TABLE lt_qmel WITH KEY qmnum = gt_objk-ihnum
+        BINARY SEARCH.
+        gt_objk-equnr = gt_objk-sernr = lt_qmel-serialnr.
+        MODIFY gt_objk.
+      ENDIF.
+    ENDLOOP.
+
+    CLEAR lv_equnr.
+    IF NOT gt_ord_full-sernraufnr IS INITIAL.
+      lv_equnr = gt_ord_full-sernraufnr.
+    ELSE.
+      lv_equnr = gt_ord_full-equipmentnummer.
+    ENDIF.
+
+    CLEAR lwa_objk.
+    READ TABLE gt_objk INTO lwa_objk WITH KEY obknr = lv_obknr
+                                              equnr = lv_equnr.
+    IF sy-subrc EQ 0.
+      IF lwa_objk-ihnum IS INITIAL.
+        CLEAR lv_qmnum.
+        SELECT SINGLE qmnum FROM qmel INTO lv_qmnum
+        WHERE qmart = 'Z2' AND
+              aufnr = gt_ord_full-fanumber AND
+              matnr = lwa_objk-matnr AND
+              serialnr = lwa_objk-equnr.
+        IF sy-subrc EQ 0.
+          PERFORM modify_z2_meldung USING lv_qmnum
+                                          if_selfield.
+
+        ELSEIF sy-subrc NE 0.
+          PERFORM create_z2_meldung USING lwa_objk
+                                          if_selfield.
+        ENDIF.
+      ELSE.
+        PERFORM modify_z2_meldung USING lwa_objk-ihnum
+                                        if_selfield.
+      ENDIF.
+
+    ELSEIF sy-subrc NE 0.
+      CLEAR lt_ordview_equnr. REFRESH lt_ordview_equnr.
+      SELECT equipmentnummer FROM /cellag/ordview INTO TABLE lt_ordview_equnr
+      WHERE qmnum = gt_ord_full-qmnum AND
+            fenum = gt_ord_full-fenum.
+      SORT lt_ordview_equnr.
+
+      CLEAR lt_objk_equnr. REFRESH lt_objk_equnr.
+      lt_objk_equnr[] = gt_objk[].
+
+      SORT lt_objk_equnr BY equnr.
+
+      CLEAR lt_ordview_equnr.
+      LOOP AT lt_ordview_equnr.
+        CLEAR lt_objk_equnr.
+        READ TABLE lt_objk_equnr WITH KEY equnr = lt_ordview_equnr-equnr
+        BINARY SEARCH.
+        IF sy-subrc EQ 0.
+          lv_index_objk = sy-tabix.
+          DELETE lt_ordview_equnr.
+          DELETE lt_objk_equnr INDEX lv_index_objk.
+        ENDIF.
+      ENDLOOP.
+
+      CLEAR lv_lines.
+      DESCRIBE TABLE lt_objk_equnr LINES lv_lines.
+
+      IF lv_lines EQ 1.
+        CLEAR lwa_objk.
+        READ TABLE lt_objk_equnr INTO lwa_objk.
+
+        IF lwa_objk-ihnum IS INITIAL.
+          CLEAR lv_qmnum.
+          SELECT SINGLE qmnum FROM qmel INTO lv_qmnum
+          WHERE qmart = 'Z2' AND
+                aufnr = gt_ord_full-fanumber AND
+                matnr = lwa_objk-matnr AND
+                serialnr = lwa_objk-equnr.
+          IF sy-subrc EQ 0.
+            PERFORM modify_z2_meldung USING lv_qmnum
+                                            if_selfield.
+          ELSEIF sy-subrc NE 0.
+            PERFORM create_z2_meldung USING lwa_objk
+                                            if_selfield.
+          ENDIF.
+        ELSE.
+          PERFORM modify_z2_meldung USING lwa_objk-ihnum
+                                          if_selfield.
+        ENDIF.
+
+      ELSE.
+* Error message  im CS-Auftrag nicht vorhanden
+        MESSAGE i000(/cellag/messages_sd) WITH TEXT-e09 lv_equnr TEXT-e10.
+      ENDIF.
+    ENDIF.
+
+*    ELSEIF sy-subrc EQ 0.
+*      "--------------------------------------------------------------
+*      " Kommentar bereits hinterlegt
+*      "--------------------------------------------------------------
+*
+*      CHECK NOT gt_ord_add-qmnum_z2 IS INITIAL.
+*      PERFORM modify_z2_meldung USING gt_ord_add-qmnum_z2
+*                                      if_selfield.
+*  ENDIF.  "IF lv_ordadd_exist = abap_false.
+  ENDIF.  "Z2 ausgewählt
+
+  IF lv_answer = '1'.
+    MOVE-CORRESPONDING gt_ord_full TO ls_ord_full.
+    PERFORM change_comment_z1 USING    lv_ordadd_exist
+                              CHANGING if_selfield
+                                       ls_ord_full.
+  ENDIF.
+ENDFORM.                    " FCODE_CHANGE_DATA
+*&---------------------------------------------------------------------*
+*&      Form  FCODE_FEHLBER_ALV
+*&---------------------------------------------------------------------*
+FORM fcode_fehlber_alv USING if_selfield TYPE slis_selfield.
+
+  DATA: lt_order_objk LIKE objk OCCURS 0 WITH HEADER LINE.
+  DATA: lv_sernr TYPE gernr.
+
+  CLEAR lt_order_objk. REFRESH lt_order_objk.
+  CLEAR lv_sernr.
+
+  IF NOT if_selfield-endsum IS INITIAL OR
+     NOT if_selfield-sumindex = 0.
+* Error message
+    MESSAGE i000(/cellag/messages_sd) WITH TEXT-e01.
+    EXIT.
+  ENDIF.
+
+  CLEAR gt_ord_full.
+  READ TABLE gt_ord_full INDEX if_selfield-tabindex.
+  IF sy-subrc NE 0.
+* Error message
+    MESSAGE i000(/cellag/messages_sd) WITH TEXT-e01.
+    EXIT.
+  ENDIF.
+
+  IF gt_ord_full-fanumber IS INITIAL.
+* Error message
+    MESSAGE i000(/cellag/messages_sd) WITH TEXT-e07.
+    EXIT.
+  ENDIF.
+
+  CLEAR lv_sernr.
+  lv_sernr = gt_ord_full-sernraufnr.
+
+  IF lv_sernr IS INITIAL.
+    lv_sernr = gt_ord_full-sernrlif.
+  ENDIF.
+
+  SUBMIT /cellag/alcarep02 WITH p_aufnr = gt_ord_full-fanumber
+                           WITH p_sernr = lv_sernr AND RETURN.
+ENDFORM.                    " FCODE_FEHLBER_ALV
+*&---------------------------------------------------------------------*
+*&      Form  FCODE_RHOB_ALV
+*&---------------------------------------------------------------------*
+FORM fcode_rhob_alv USING if_selfield TYPE slis_selfield.
+  IF NOT if_selfield-endsum IS INITIAL OR
+     NOT if_selfield-sumindex = 0.
+* Error message
+    MESSAGE i000(/cellag/messages_sd) WITH TEXT-e01.
+    EXIT.
+  ENDIF.
+
+  CLEAR gt_ord_full.
+  READ TABLE gt_ord_full INDEX if_selfield-tabindex.
+  IF sy-subrc NE 0.
+* Error message
+    MESSAGE i000(/cellag/messages_sd) WITH TEXT-e01.
+    EXIT.
+  ENDIF.
+
+  CASE if_selfield-fieldname.
+    WHEN 'SERIALMELD'.
+      SUBMIT /cellag/rep_hist_board WITH pa_serge = gt_ord_full-serialmeld
+       AND  RETURN.
+
+    WHEN 'SERIALREC'.
+      SUBMIT /cellag/rep_hist_board WITH pa_serge = gt_ord_full-serialrec
+       AND  RETURN.
+
+    WHEN 'SERIALDELIVER'.
+      SUBMIT /cellag/rep_hist_board WITH pa_serge = gt_ord_full-serialdeliver
+       AND  RETURN.
+
+    WHEN OTHERS.
+      CALL FUNCTION 'POPUP_TO_INFORM'
+        EXPORTING
+          titel = TEXT-t01
+          txt1  = TEXT-t02
+          txt2  = TEXT-t03.
+
+  ENDCASE.
+
+ENDFORM.                    " FCODE_RHOB_ALV
+
+*&---------------------------------------------------------------------*
+*&      Form  FCODE_UPLOAD_DATA
+*&---------------------------------------------------------------------*
+FORM fcode_upload_data USING if_selfield TYPE slis_selfield.
+  DATA: lt_listobject LIKE abaplist OCCURS 0 WITH HEADER LINE.
+
+  SUBMIT /cellag/order_data_status VIA SELECTION-SCREEN
+  AND RETURN.
+
+  PERFORM get_data.
+
+  if_selfield-refresh = 'X'.
+
+ENDFORM.                    " FCODE_UPLOAD_DATA
+
+*&---------------------------------------------------------------------*
+*&      Form  FCODE_UPLOAD_Z1_LTXT
+*&---------------------------------------------------------------------*
+FORM fcode_upload_z1_ltxt USING if_selfield TYPE slis_selfield.
+  DATA: lt_listobject LIKE abaplist OCCURS 0 WITH HEADER LINE.
+
+  SUBMIT zupload_ordview_ltxt VIA SELECTION-SCREEN
+  AND RETURN.
+
+  PERFORM get_data.
+
+  if_selfield-refresh = 'X'.
+
+ENDFORM.                    " FCODE_UPLOAD_Z1_LTXT
+
+*&---------------------------------------------------------------------*
+*&      Form  UPDATE_Z2_DATA
+*&---------------------------------------------------------------------*
+FORM update_z2_data USING if_qmnum.
+  DATA: lwa_qmel  LIKE qmel,
+        lwa_jest  LIKE jest,
+        lwa_tj02t LIKE tj02t.
+
+  CLEAR lwa_qmel.
+  SELECT SINGLE * FROM qmel INTO lwa_qmel
+  WHERE qmart = 'Z2' AND
+        qmnum = if_qmnum.
+
+  CLEAR gwa_ord_add.
+  gwa_ord_add-qmnum = gt_ord_full-qmnum.
+  gwa_ord_add-fenum = gt_ord_full-fenum.
+  gwa_ord_add-counter = gt_ord_full-counter.
+  gwa_ord_add-qmnum_z2 = if_qmnum.
+
+  IF lwa_qmel-kzloesch IS INITIAL.
+
+    CLEAR lwa_tj02t.
+    SELECT SINGLE * FROM tj02t INTO lwa_tj02t WHERE txt04 = 'LÖVM'.
+
+    CLEAR lwa_jest.
+    SELECT SINGLE * FROM jest INTO lwa_jest
+    WHERE objnr = lwa_qmel-objnr AND
+          stat = lwa_tj02t-istat AND
+          inact = ' '.
+
+    IF sy-subrc NE 0.
+
+      PERFORM select_z2_data USING if_qmnum.
+
+      CLEAR gwa_ordview.
+      READ TABLE gt_ordview INTO gwa_ordview
+      WITH KEY qmnum = gt_ord_full-qmnum
+               fenum = gt_ord_full-fenum
+               counter = gt_ord_full-counter.
+
+      CLEAR gt_qmfe.
+      READ TABLE gt_qmfe WITH KEY qmnum = if_qmnum
+      BINARY SEARCH.
+
+      PERFORM build_remakrs_data USING if_qmnum.
+    ENDIF.
+
+  ENDIF.
+
+  MODIFY (gv_tabname) FROM gwa_ordview.
+
+  IF gv_tabname <> co_tab_ordview.
+    "immer auch in Orignaltabelle ändern
+    MODIFY (co_tab_ordview) FROM gwa_ordview.
+  ENDIF.
+
+  MODIFY /cellag/ord_add FROM gwa_ord_add.
+
+ENDFORM.                    " UPDATE_Z2_DATA
+*&---------------------------------------------------------------------*
+*&      Form  SELECT_Z2_DATA
+*&---------------------------------------------------------------------*
+FORM select_z2_data USING if_qmnum.
+
+  DATA: lt_tlines  TYPE STANDARD TABLE OF tline,
+        lwa_tlines TYPE tline.
+
+  DATA: lv_name LIKE thead-tdname.
+
+  RANGES: lr_urcod FOR qmur-urcod.
+
+  CLEAR lr_urcod. REFRESH lr_urcod.
+  lr_urcod-sign = 'I'.
+  lr_urcod-option = 'CP'.
+  lr_urcod-low = 'A*'.
+  APPEND lr_urcod. REFRESH lr_urcod.
+
+  SELECT a~qmnum a~aufnr a~matnr a~qmcod a~serialnr
+  b~fenum b~erdat b~fetxt b~fegrp b~fecod b~otgrp
+  b~oteil b~kzloesch b~besz
+  FROM qmel AS a LEFT OUTER JOIN qmfe AS b
+  ON a~qmnum = b~qmnum
+  INTO TABLE gt_qmfe
+  WHERE a~qmnum = if_qmnum.
+
+  SORT gt_qmfe DESCENDING BY kzloesch.
+  DELETE gt_qmfe WHERE NOT kzloesch IS INITIAL.
+  SORT gt_qmfe BY qmnum fenum.
+
+  CLEAR gt_qmma_aux. REFRESH gt_qmma_aux.
+  CLEAR gt_qmur. REFRESH gt_qmur.
+
+  SELECT qmnum manum fenum mngrp mncod matxt ernam erdat
+  aenam aedat peter indtx kzmla
+  erzeit aezeit qmanum
+*  FROM qmma INTO TABLE gt_qmma
+  FROM qmma INTO TABLE gt_qmma_aux                          "HB260113
+  WHERE qmnum = if_qmnum AND
+        kzloesch EQ space.
+  SELECT qmnum erdat urgrp urcod FROM qmur
+  INTO TABLE gt_qmur
+  WHERE qmnum = if_qmnum AND
+        urgrp = 'ZAKZ' AND
+        urcod IN lr_urcod AND
+        kzloesch = ' '.
+
+  SORT gt_qmma_aux BY qmnum ASCENDING aedat DESCENDING aezeit DESCENDING qmanum ASCENDING.
+
+  CLEAR gt_qmma. REFRESH gt_qmma.
+
+  CLEAR gt_qmma_aux.
+  LOOP AT gt_qmma_aux.
+    MOVE-CORRESPONDING gt_qmma_aux TO gt_qmma.
+    IF gt_qmma-aenam IS INITIAL.
+      gt_qmma-aenam = gt_qmma-ernam.
+    ENDIF.
+    IF gt_qmma-aedat IS INITIAL.
+      gt_qmma-aedat = gt_qmma-erdat.
+    ENDIF.
+    IF gt_qmma-aezeit IS INITIAL.
+      gt_qmma-aezeit = gt_qmma-erzeit.
+    ENDIF.
+
+    MOVE gt_qmma-matxt TO gt_qmma-line.
+
+    IF NOT gt_qmma-indtx IS INITIAL.
+      "Trenner Kurz/Langtext
+      CONCATENATE gt_qmma-line '/' INTO gt_qmma-line.
+
+      CLEAR lt_tlines. REFRESH lt_tlines.
+      CLEAR lv_name.
+      CONCATENATE gt_qmma-qmnum gt_qmma-manum INTO lv_name.
+      CALL FUNCTION 'READ_TEXT'
+        EXPORTING
+          id                      = 'LTXT'
+          language                = gt_qmma-kzmla   "HB291123 in der gespeicherten Sprache
+          name                    = lv_name
+          object                  = 'QMMA'
+        TABLES
+          lines                   = lt_tlines
+        EXCEPTIONS
+          id                      = 1
+          language                = 2
+          name                    = 3
+          not_found               = 4
+          object                  = 5
+          reference_check         = 6
+          wrong_access_to_archive = 7
+          OTHERS                  = 8.
+      IF sy-subrc EQ 0.
+        CLEAR lwa_tlines.
+        LOOP AT lt_tlines INTO lwa_tlines.
+*          CONDENSE lwa_tlines-tdline.
+          IF gt_qmma-line IS INITIAL.
+            gt_qmma-line = lwa_tlines-tdline.
+          ELSE.
+            CONCATENATE gt_qmma-line lwa_tlines-tdline INTO gt_qmma-line.
+          ENDIF.
+        ENDLOOP.
+      ENDIF.
+    ENDIF.
+
+    APPEND gt_qmma.
+    CLEAR gt_qmma.
+  ENDLOOP.
+
+  SORT gt_qmur BY qmnum.
+
+ENDFORM.                    " SELECT_Z2_DATA
+*&---------------------------------------------------------------------*
+*&      Form  BUILD_REMAKRS_DATA
+*&---------------------------------------------------------------------*
+FORM build_remakrs_data USING if_qmnum.
+  DATA: BEGIN OF lt_termin OCCURS 0,
+          aedat     LIKE qmma-aedat,
+          aezeit    LIKE qmma-aezeit,
+          qmanum    LIKE qmma-qmnum,
+          value(20),
+        END OF lt_termin.
+
+  DATA: lv_index_qmma   TYPE sytabix,
+        lv_index_termin TYPE sytabix,
+        lv_datum        TYPE sydatum,
+        lv_week         LIKE scal-week,
+        lv_string       TYPE string.
+
+  IF NOT gt_qmfe-qmcod IS INITIAL.
+    gwa_ordview-akz = gt_qmfe-qmcod.
+  ENDIF.
+
+  gwa_ordview-fcode = gt_qmfe-fegrp.
+  gwa_ordview-flage = gt_qmfe-oteil.
+
+  CLEAR gt_tq80.
+  READ TABLE gt_tq80 WITH KEY qmart = 'Z2'.
+
+  CLEAR gt_qpct.
+  READ TABLE gt_qpct WITH KEY katalogart = gt_tq80-otkat    "katalogart = '5'
+                              codegruppe = gt_qmfe-otgrp
+                              code = gt_qmfe-oteil
+  BINARY SEARCH.
+  gwa_ordview-flagetxt = gt_qpct-kurztext.
+
+  CLEAR gt_qpgt.
+  READ TABLE gt_qpgt WITH KEY katalogart = gt_tq80-fekat    "katalogart = 'Z'
+                              codegruppe = gt_qmfe-fegrp
+  BINARY SEARCH.
+  gwa_ordview-fcodetext = gt_qpgt-kurztext.
+
+  gwa_ordview-fart = gt_qmfe-fecod.
+
+  CLEAR gt_qpct.
+  READ TABLE gt_qpct WITH KEY katalogart = gt_tq80-fekat    "katalogart = 'Z'
+                              codegruppe = gt_qmfe-fegrp
+                              code = gt_qmfe-fecod
+  BINARY SEARCH.
+  gwa_ordview-farttext = gt_qpct-kurztext.
+  gwa_ordview-errortext = gt_qmfe-fetxt.
+  gwa_ordview-fehler1 = gt_qmfe-besz.
+
+  SORT gt_qmma BY qmnum ASCENDING aedat DESCENDING aezeit DESCENDING qmanum ASCENDING.
+
+  CLEAR gt_qmma.
+  READ TABLE gt_qmma WITH KEY qmnum = gt_qmfe-qmnum
+  BINARY SEARCH.
+  IF sy-subrc EQ 0.
+    lv_datum = sy-datum - 7.
+    gwa_ord_add-aedat = gt_qmma-aedat.
+    gwa_ord_add-aeuhr = gt_qmma-aezeit.
+    gwa_ord_add-aenam = gt_qmma-aenam.
+
+    IF gt_qmma-aedat GE lv_datum.
+      gwa_ord_add-changes = c_true.
+    ENDIF.
+  ENDIF.
+
+  CLEAR lt_termin. REFRESH lt_termin.
+
+  CLEAR lv_index_termin.
+  CLEAR gt_qmma.
+  READ TABLE gt_qmma WITH KEY qmnum = gt_qmfe-qmnum
+  BINARY SEARCH.
+  IF sy-subrc EQ 0.
+    lv_index_qmma = sy-tabix.
+    LOOP AT gt_qmma FROM lv_index_qmma.
+      IF gt_qmma-qmnum <> gt_qmfe-qmnum.
+        EXIT.
+      ENDIF.
+      IF gt_qmma-mngrp ='ZRGSIDT'.
+        lv_index_termin = lv_index_termin + 1.
+        IF lv_index_termin LE 5.
+          lt_termin-aedat = gt_qmma-aedat.
+          lt_termin-aezeit = gt_qmma-aezeit.
+          lt_termin-qmanum = gt_qmma-qmanum.
+          CASE gt_qmma-mncod.
+            WHEN '00'.
+              lt_termin-value = gt_qmma-peter.
+            WHEN '99'.
+              lt_termin-value = 'MISSING'.
+          ENDCASE.
+          COLLECT lt_termin.
+          CLEAR lt_termin.
+        ENDIF.
+        IF lv_index_termin = 1.
+          CASE gt_qmma-mncod.
+            WHEN '00'.
+              gwa_ord_add-actualcommitdate = gt_qmma-peter.
+              CLEAR lv_week.
+              CALL FUNCTION 'GET_WEEK_INFO_BASED_ON_DATE' "#EC CI_USAGE_OK[2296016] "INS S4CONV ECC - HPC(2508-614)
+                EXPORTING
+                  date = gwa_ord_add-actualcommitdate
+                IMPORTING
+                  week = lv_week.
+              CONCATENATE 'CW' lv_week+4(2) INTO gwa_ord_add-deliverplan
+              SEPARATED BY space.
+              CONCATENATE gwa_ord_add-deliverplan ',' lv_week(4) INTO gwa_ord_add-deliverplan.
+            WHEN '99'.
+              gwa_ord_add-actualcommitdate = '20201010'.
+              gwa_ord_add-deliverplan = 'MISSING'.
+          ENDCASE.
+          gwa_ord_add-lastcommitdate = gt_qmma-aedat.
+
+        ELSEIF lv_index_termin = 2.
+          CASE gt_qmma-mncod.
+            WHEN '00'.
+              gwa_ord_add-recommitedhist = gt_qmma-peter.
+            WHEN '99'.
+              gwa_ord_add-recommitedhist = '20201010'.
+          ENDCASE.
+        ENDIF.
+      ELSE.
+        PERFORM fill_remarks_data USING gt_qmma.
+      ENDIF.
+    ENDLOOP.
+  ENDIF.
+
+  CLEAR lt_termin.
+  SORT lt_termin BY aedat aezeit qmanum.
+
+  CLEAR lt_termin.
+  LOOP AT lt_termin.
+    IF lt_termin-value = 'MISSING'.
+      IF gwa_ord_add-deliverplanhist IS INITIAL.
+        gwa_ord_add-deliverplanhist = lt_termin-value.
+      ELSE.
+        CONCATENATE gwa_ord_add-deliverplanhist ';' lt_termin-value
+        INTO gwa_ord_add-deliverplanhist.
+      ENDIF.
+    ELSE.
+      CLEAR lv_datum.
+      MOVE lt_termin-value TO lv_datum.
+      CLEAR: lv_string,
+             lv_week.
+      CALL FUNCTION 'GET_WEEK_INFO_BASED_ON_DATE' "#EC CI_USAGE_OK[2296016] "INS S4CONV ECC - HPC(2508-614)
+        EXPORTING
+          date = lv_datum
+        IMPORTING
+          week = lv_week.
+      CONCATENATE 'CW' lv_week+4(2) INTO lv_string
+      SEPARATED BY space.
+      CONCATENATE lv_string ',' lv_week(4) INTO lv_string.
+      IF gwa_ord_add-deliverplanhist IS INITIAL.
+        gwa_ord_add-deliverplanhist = lv_string.
+      ELSE.
+        CONCATENATE gwa_ord_add-deliverplanhist ';' lv_string
+        INTO gwa_ord_add-deliverplanhist.
+      ENDIF.
+    ENDIF.
+  ENDLOOP.
+
+  PERFORM build_gsi_remarks TABLES gt_qmma.
+
+ENDFORM.                    " BUILD_REMAKRS_DATA
+*&---------------------------------------------------------------------*
+*&      Form  BUILD_GSI_REMARKS
+*&---------------------------------------------------------------------*
+FORM build_gsi_remarks TABLES it_qmma STRUCTURE gt_qmma.
+  DATA: lwa_qmma    LIKE gt_qmma,
+        lwa_ord_add LIKE /cellag/ord_add.
+
+  MOVE-CORRESPONDING gwa_ord_add TO lwa_ord_add.
+
+  CLEAR it_qmma.
+  SORT it_qmma BY qmnum mngrp qmanum.
+
+* First remarks with code '9999'
+  CLEAR lwa_qmma.
+  READ TABLE it_qmma INTO lwa_qmma
+  WITH KEY qmnum = gt_qmfe-qmnum
+           mngrp = 'ZRRS01'
+           qmanum = '9999'
+  BINARY SEARCH.
+  IF sy-subrc EQ 0.
+    MOVE lwa_ord_add-remarksrs TO gwa_ord_add-gsiremarks.
+    CLEAR lwa_ord_add-remarksrs.
+  ENDIF.
+
+  CLEAR lwa_qmma.
+  READ TABLE it_qmma INTO lwa_qmma
+  WITH KEY qmnum = gt_qmfe-qmnum
+           mngrp = 'ZRLO01'
+           qmanum = '9999'
+  BINARY SEARCH.
+  IF sy-subrc EQ 0.
+    IF gwa_ord_add-gsiremarks IS INITIAL.
+      MOVE lwa_ord_add-remarkslog TO gwa_ord_add-gsiremarks.
+    ELSE.
+      CONCATENATE gwa_ord_add-gsiremarks '/' lwa_ord_add-remarkslog
+      INTO gwa_ord_add-gsiremarks.
+    ENDIF.
+    CLEAR lwa_ord_add-remarkslog.
+  ENDIF.
+
+  CLEAR lwa_qmma.
+  READ TABLE it_qmma INTO lwa_qmma
+  WITH KEY qmnum = gt_qmfe-qmnum
+           mngrp = 'ZRVM01'
+           qmanum = '9999'
+  BINARY SEARCH.
+  IF sy-subrc EQ 0.
+    IF gwa_ord_add-gsiremarks IS INITIAL.
+      MOVE lwa_ord_add-remarksvm TO gwa_ord_add-gsiremarks.
+    ELSE.
+      CONCATENATE gwa_ord_add-gsiremarks '/' lwa_ord_add-remarksvm
+      INTO gwa_ord_add-gsiremarks.
+    ENDIF.
+    CLEAR lwa_ord_add-remarksvm.
+  ENDIF.
+
+  CLEAR lwa_qmma.
+  READ TABLE it_qmma INTO lwa_qmma
+  WITH KEY qmnum = gt_qmfe-qmnum
+            mngrp = 'ZRSP01'
+            qmanum = '9999'
+  BINARY SEARCH.
+  IF sy-subrc EQ 0.
+    IF gwa_ord_add-gsiremarks IS INITIAL.
+      MOVE lwa_ord_add-remarksspm TO gwa_ord_add-gsiremarks.
+    ELSE.
+      CONCATENATE gwa_ord_add-gsiremarks '/' lwa_ord_add-remarksspm
+      INTO gwa_ord_add-gsiremarks.
+    ENDIF.
+    CLEAR lwa_ord_add-remarksspm.
+  ENDIF.
+
+  CLEAR lwa_qmma.
+  READ TABLE it_qmma INTO lwa_qmma
+  WITH KEY qmnum = gt_qmfe-qmnum
+           mngrp = 'ZRPU01'
+           qmanum = '9999'
+  BINARY SEARCH.
+  IF sy-subrc EQ 0.
+    IF gwa_ord_add-gsiremarks IS INITIAL.
+      MOVE lwa_ord_add-remarkspur TO gwa_ord_add-gsiremarks.
+    ELSE.
+      CONCATENATE gwa_ord_add-gsiremarks '/' lwa_ord_add-remarkspur
+      INTO gwa_ord_add-gsiremarks.
+    ENDIF.
+    CLEAR lwa_ord_add-remarkspur.
+  ENDIF.
+
+* Texts without any code '9999'
+  IF NOT lwa_ord_add-remarksrs IS INITIAL.
+    IF gwa_ord_add-gsiremarks IS INITIAL.
+      MOVE lwa_ord_add-remarksrs TO gwa_ord_add-gsiremarks.
+    ELSE.
+      CONCATENATE gwa_ord_add-gsiremarks '/' lwa_ord_add-remarksrs
+      INTO gwa_ord_add-gsiremarks.
+    ENDIF.
+  ENDIF.
+
+  IF NOT lwa_ord_add-remarkslog IS INITIAL.
+    IF gwa_ord_add-gsiremarks IS INITIAL.
+      MOVE lwa_ord_add-remarkslog TO gwa_ord_add-gsiremarks.
+    ELSE.
+      CONCATENATE gwa_ord_add-gsiremarks '/' lwa_ord_add-remarkslog
+      INTO gwa_ord_add-gsiremarks.
+    ENDIF.
+  ENDIF.
+
+  IF NOT lwa_ord_add-remarksvm IS INITIAL.
+    IF gwa_ord_add-gsiremarks IS INITIAL.
+      MOVE lwa_ord_add-remarksvm TO gwa_ord_add-gsiremarks.
+    ELSE.
+      CONCATENATE gwa_ord_add-gsiremarks '/' lwa_ord_add-remarksvm
+      INTO gwa_ord_add-gsiremarks.
+    ENDIF.
+  ENDIF.
+
+  IF NOT lwa_ord_add-remarksspm IS INITIAL.
+    IF gwa_ord_add-gsiremarks IS INITIAL.
+      MOVE lwa_ord_add-remarksspm TO gwa_ord_add-gsiremarks.
+    ELSE.
+      CONCATENATE gwa_ord_add-gsiremarks '/' lwa_ord_add-remarksspm
+      INTO gwa_ord_add-gsiremarks.
+    ENDIF.
+  ENDIF.
+
+  IF NOT lwa_ord_add-remarkspur IS INITIAL.
+    IF gwa_ord_add-gsiremarks IS INITIAL.
+      MOVE lwa_ord_add-remarkspur TO gwa_ord_add-gsiremarks.
+    ELSE.
+      CONCATENATE gwa_ord_add-gsiremarks '/' lwa_ord_add-remarkspur
+      INTO gwa_ord_add-gsiremarks.
+    ENDIF.
+  ENDIF.
+
+ENDFORM.                    " BUILD_GSI_REMARKS
+*&---------------------------------------------------------------------*
+*&      Form  FILL_REMARKS_DATA
+*&---------------------------------------------------------------------*
+FORM fill_remarks_data USING if_qmma STRUCTURE gt_qmma.
+  CASE gt_qmma-mngrp.
+    WHEN 'ZRRS01'.   "Repairshop
+      IF gwa_ord_add-remarksrs IS INITIAL.
+        gwa_ord_add-remarksrs = if_qmma-line.
+      ELSE.
+        CONCATENATE gwa_ord_add-remarksrs '/' if_qmma-line
+        INTO gwa_ord_add-remarksrs.
+      ENDIF.
+      IF gwa_ord_add-timestamprs IS INITIAL.
+        gwa_ord_add-timestamprs = if_qmma-aedat.
+      ENDIF.
+    WHEN 'ZROC01'.   "Order control
+      IF gwa_ord_add-remarksoc IS INITIAL.
+        gwa_ord_add-remarksoc = if_qmma-line.
+      ELSE.
+        CONCATENATE gwa_ord_add-remarksoc '/' if_qmma-line
+        INTO gwa_ord_add-remarksoc.                         "HB180115
+      ENDIF.
+      IF gwa_ord_add-timestampoc IS INITIAL.
+        gwa_ord_add-timestampoc = if_qmma-aedat.
+      ENDIF.
+    WHEN 'ZRVM01'.   "Vendor Management
+      IF gwa_ord_add-remarksvm IS INITIAL.
+        gwa_ord_add-remarksvm = if_qmma-line.
+      ELSE.
+        CONCATENATE gwa_ord_add-remarksvm '/' if_qmma-line
+        INTO gwa_ord_add-remarksvm.
+      ENDIF.
+      IF gwa_ord_add-timestampvm IS INITIAL.
+        gwa_ord_add-timestampvm = if_qmma-aedat.
+      ENDIF.
+    WHEN 'ZRSP01'.   "SpareParsManagement
+      IF gwa_ord_add-remarksspm IS INITIAL.
+        gwa_ord_add-remarksspm = if_qmma-line.
+      ELSE.
+        CONCATENATE gwa_ord_add-remarksspm '/' if_qmma-line
+        INTO gwa_ord_add-remarksspm.
+      ENDIF.
+      IF gwa_ord_add-timestampspm IS INITIAL.
+        gwa_ord_add-timestampspm = if_qmma-aedat.
+      ENDIF.
+    WHEN 'ZRPU01'.   "Purschasing
+      IF gwa_ord_add-remarkspur IS INITIAL.
+        gwa_ord_add-remarkspur = if_qmma-line.
+      ELSE.
+        CONCATENATE gwa_ord_add-remarkspur '/' if_qmma-line
+        INTO gwa_ord_add-remarkspur.
+      ENDIF.
+      IF gwa_ord_add-timestamppur IS INITIAL.
+        gwa_ord_add-timestamppur = if_qmma-aedat.
+      ENDIF.
+    WHEN 'ZRLO01'.   "Logistik
+      IF gwa_ord_add-remarkslog IS INITIAL.
+        gwa_ord_add-remarkslog = if_qmma-line.
+      ELSE.
+        CONCATENATE gwa_ord_add-remarkslog '/' if_qmma-line
+        INTO gwa_ord_add-remarkslog.
+      ENDIF.
+      IF gwa_ord_add-timestamplog IS INITIAL.
+        gwa_ord_add-timestamplog = if_qmma-aedat.
+      ENDIF.
+    WHEN 'ZRGSIST'.
+      IF gwa_ord_add-status IS INITIAL.
+        gwa_ord_add-status = if_qmma-mncod.
+      ENDIF.
+  ENDCASE.
+ENDFORM.                    " FILL_REMARKS_DATA
+*&---------------------------------------------------------------------*
+*&      Form  DELETE_Z2_DATA
+*&---------------------------------------------------------------------*
+FORM delete_z2_data USING if_qmnum.
+
+  CLEAR gwa_ordview.
+  CLEAR gwa_ord_add.
+
+  SELECT SINGLE qmnum fenum counter qmnum_z2 FROM /cellag/ord_add
+  INTO CORRESPONDING FIELDS OF gwa_ord_add
+  WHERE qmnum = gt_ord_full-qmnum AND
+        fenum = gt_ord_full-fenum AND
+        counter = gt_ord_full-counter AND
+        qmnum_z2 = if_qmnum.
+
+  CHECK sy-subrc EQ 0.
+
+  CLEAR gwa_ordview.
+  READ TABLE gt_ordview INTO gwa_ordview
+  WITH KEY qmnum = gt_ord_full-qmnum
+           fenum = gt_ord_full-fenum
+           counter = gt_ord_full-counter.
+
+  CLEAR: gwa_ordview-akz,
+         gwa_ordview-fcode,
+         gwa_ordview-flage,
+         gwa_ordview-flagetxt,
+         gwa_ordview-fcodetext,
+         gwa_ordview-fart,
+         gwa_ordview-farttext,
+         gwa_ordview-errortext,
+         gwa_ordview-fehler1.
+
+* AKZ--> Retoure
+  SELECT SINGLE /cellag/akz INTO gwa_ordview-akz FROM lips
+  WHERE vbeln = gwa_ordview-retoure AND
+        posnr = gwa_ordview-retoure_posnr.
+
+  MODIFY /cellag/ord_add FROM gwa_ord_add.
+
+  IF sy-subrc NE 0.
+    ROLLBACK WORK.
+    EXIT.
+  ENDIF.
+
+  MODIFY (gv_tabname) FROM gwa_ordview.
+  IF sy-subrc NE 0.
+    ROLLBACK WORK.
+  ENDIF.
+
+  IF gv_tabname <> co_tab_ordview.
+    "immer auch in Orignaltabelle ändern
+    MODIFY (co_tab_ordview) FROM gwa_ordview.
+    IF sy-subrc NE 0.
+      ROLLBACK WORK.
+    ENDIF.
+  ENDIF.
+
+  IF sy-subrc EQ 0.
+    COMMIT WORK.
+  ENDIF.
+ENDFORM.                    " DELETE_Z2_DATA
+*&---------------------------------------------------------------------*
+*&      Form  SHOW_PROGRESS
+*&---------------------------------------------------------------------*
+FORM show_progress USING if_per if_text.
+  CALL FUNCTION 'SAPGUI_PROGRESS_INDICATOR'
+    EXPORTING
+      percentage = if_per
+      text       = if_text.
+
+ENDFORM.                    " SHOW_PROGRESS
+*&---------------------------------------------------------------------*
+*&      Form  SELECT_RETURNS
+*&---------------------------------------------------------------------*
+FORM select_returns.
+  DATA: lt_ordview_ruck  LIKE gt_ordview OCCURS 0 WITH HEADER LINE,
+        lt_ord_add_ruck  LIKE gt_ord_add OCCURS 0 WITH HEADER LINE,
+        lt_ord_full_ruck LIKE gt_ord_full OCCURS 0 WITH HEADER LINE.
+
+  DATA: BEGIN OF lt_lifnr OCCURS 0,
+          lifnr LIKE lfa1-lifnr,
+        END OF lt_lifnr.
+
+  DATA: lt_key_par   LIKE gt_key OCCURS 0 WITH HEADER LINE,
+        lt_lifnr_par LIKE lt_lifnr OCCURS 0 WITH HEADER LINE.
+
+  DATA: lv_begdatum TYPE sydatum,
+        lv_enddatum TYPE sydatum,
+        lv_lastdock TYPE sydatum,
+        lv_difdays  TYPE i.
+
+  DATA: lv_count1   TYPE i,
+        lv_count2   TYPE i,
+        lv_countsub TYPE i,
+        lv_sercount TYPE c LENGTH 6,
+        lv_subcount TYPE c LENGTH 5.
+
+  DATA: lv_text TYPE c LENGTH 50.
+
+  RANGES: lr_dockdate FOR /cellag/ordview-dockdate.
+  DELETE gt_ord_full WHERE dockdate EQ space OR
+                           serialrec EQ space.
+
+  SORT gt_ord_full BY serialrec.
+
+  DELETE ADJACENT DUPLICATES FROM gt_ord_full COMPARING serialrec.
+
+  IF pa_vorwa EQ c_true.
+    SORT gt_ord_full BY dockdate DESCENDING.
+  ELSE.
+    SORT gt_ord_full BY dockdate ASCENDING.
+  ENDIF.
+
+  CLEAR gt_ord_full.
+  READ TABLE gt_ord_full INDEX 1.
+
+  lv_begdatum = gt_ord_full-dockdate.
+
+  IF NOT pa_rudat IS INITIAL.
+    lv_enddatum = pa_rudat.
+  ELSE.
+    CASE c_true.
+      WHEN pa_01mon.
+        lv_difdays = 30.
+      WHEN pa_03mon.
+        lv_difdays = 90.
+      WHEN pa_06mon.
+        lv_difdays = 180.
+      WHEN pa_12mon.
+        lv_difdays = 360.
+    ENDCASE.
+    IF pa_vorwa EQ c_true.
+      lv_enddatum = lv_begdatum + lv_difdays.
+    ELSE.
+      lv_enddatum = lv_begdatum - lv_difdays.
+    ENDIF.
+  ENDIF.
+
+  CLEAR lr_dockdate. REFRESH lr_dockdate.
+
+  lr_dockdate-sign = 'I'.
+  lr_dockdate-option = 'EQ'.
+
+  IF pa_vorwa EQ c_true.
+    lr_dockdate-low = lv_begdatum.
+    lr_dockdate-high = lv_enddatum.
+  ELSE.
+    lr_dockdate-low = lv_enddatum.
+    lr_dockdate-high = lv_begdatum.
+  ENDIF.
+
+  APPEND lr_dockdate. CLEAR lr_dockdate.
+
+  PERFORM show_progress USING 30 TEXT-t08.
+
+  CLEAR lt_ordview_ruck. REFRESH lt_ordview_ruck.
+
+  SELECT * FROM /cellag/ordview INTO TABLE lt_ordview_ruck
+  FOR ALL ENTRIES IN gt_ord_full
+  WHERE serialrec = gt_ord_full-serialrec AND
+        qmnum <> gt_ord_full-qmnum AND
+        dockdate IN lr_dockdate.
+
+  SORT lt_ordview_ruck BY qmnum fenum counter.
+
+  CLEAR lt_lifnr. REFRESH lt_lifnr.
+  CLEAR gt_key. REFRESH gt_key.
+  CLEAR lt_ordview_ruck.
+  LOOP AT lt_ordview_ruck.
+    gt_key-qmnum = lt_ordview_ruck-qmnum.
+    gt_key-fenum = lt_ordview_ruck-fenum.
+    gt_key-counter = lt_ordview_ruck-counter.
+    APPEND gt_key. CLEAR gt_key.
+    IF NOT lt_ordview_ruck-hersteller IS INITIAL.
+      lt_lifnr-lifnr = lt_ordview_ruck-hersteller.
+      COLLECT lt_lifnr.
+      CLEAR lt_lifnr.
+    ENDIF.
+  ENDLOOP.
+
+  SORT gt_key BY qmnum fenum counter.
+  SORT lt_lifnr.
+
+  CLEAR lt_ord_add_ruck. REFRESH lt_ord_add_ruck.
+  IF NOT gt_key[] IS INITIAL.
+    DO.
+      build_table gt_key lt_key_par.
+      SELECT * FROM /cellag/ord_add APPENDING TABLE lt_ord_add_ruck
+      FOR ALL ENTRIES IN lt_key_par
+      WHERE qmnum = lt_key_par-qmnum AND
+            fenum = lt_key_par-fenum AND
+            counter = lt_key_par-counter.
+    ENDDO.
+  ENDIF.
+
+  CLEAR gt_lfa1. REFRESH gt_lfa1.
+  IF NOT lt_lifnr[] IS INITIAL.
+    DO.
+      build_table lt_lifnr lt_lifnr_par.
+      SELECT lifnr name1 FROM lfa1
+      APPENDING TABLE gt_lfa1
+      FOR ALL ENTRIES IN lt_lifnr_par
+      WHERE lifnr = lt_lifnr_par-lifnr.
+    ENDDO.
+  ENDIF.
+
+  SORT gt_lfa1 BY lifnr.
+
+  SORT lt_ord_add_ruck BY qmnum fenum counter.
+  CLEAR lt_ord_full_ruck. REFRESH lt_ord_full_ruck.
+
+  CLEAR lt_ordview_ruck.
+  LOOP AT lt_ordview_ruck.
+    MOVE-CORRESPONDING lt_ordview_ruck TO lt_ord_full_ruck.
+    CLEAR lt_ord_add_ruck.
+    READ TABLE lt_ord_add_ruck WITH KEY qmnum = lt_ordview_ruck-qmnum
+                                        fenum = lt_ordview_ruck-fenum
+                                        counter = lt_ordview_ruck-counter
+    BINARY SEARCH.
+    IF sy-subrc EQ 0.
+      MOVE-CORRESPONDING lt_ord_add_ruck TO lt_ord_full_ruck.
+    ENDIF.
+    CLEAR gt_lfa1.
+    READ TABLE gt_lfa1 WITH KEY lifnr = lt_ordview_ruck-hersteller
+    BINARY SEARCH.
+    IF sy-subrc EQ 0.
+      lt_ord_full_ruck-herstellername = gt_lfa1-name1.
+    ENDIF.
+    APPEND lt_ord_full_ruck.
+    CLEAR lt_ord_full_ruck.
+  ENDLOOP.
+
+  IF pa_vorwa EQ c_true.
+    SORT lt_ord_full_ruck BY serialrec dockdate ASCENDING.
+  ELSE.
+    SORT lt_ord_full_ruck BY serialrec dockdate DESCENDING.
+  ENDIF.
+
+  CLEAR: lv_count1.
+  CLEAR gt_ord_full.
+  LOOP AT gt_ord_full.
+    CLEAR lr_dockdate. REFRESH lr_dockdate.
+    lr_dockdate-sign = 'I'.
+    lr_dockdate-option = 'EQ'.
+    IF NOT pa_rudat IS INITIAL.
+      lv_enddatum = pa_rudat.
+    ELSE.
+      IF pa_vorwa EQ c_true.
+        lv_enddatum = gt_ord_full-dockdate + lv_difdays.
+      ELSE.
+        lv_enddatum = gt_ord_full-dockdate - lv_difdays.
+      ENDIF.
+    ENDIF.
+
+    IF pa_vorwa EQ c_true.
+      lr_dockdate-low = gt_ord_full-dockdate.
+      lr_dockdate-high = lv_enddatum.
+    ELSE.
+      lr_dockdate-low = lv_enddatum.
+      lr_dockdate-high = gt_ord_full-dockdate.
+    ENDIF.
+    APPEND lr_dockdate. CLEAR lr_dockdate.
+
+    CLEAR: lv_count2, lv_lastdock.
+
+    CLEAR lt_ord_full_ruck.
+    LOOP AT lt_ord_full_ruck WHERE
+    serialrec = gt_ord_full-serialrec AND
+    dockdate IN lr_dockdate.
+      ADD 1 TO lv_count2.
+      IF lv_count2 = 1.
+        ADD 1 TO lv_count1.
+        WRITE lv_count1 TO lv_sercount LEFT-JUSTIFIED.
+        lv_lastdock = gt_ord_full-dockdate.
+      ENDIF.
+      lt_ord_full_ruck-retdays = abs( lv_lastdock - lt_ord_full_ruck-dockdate ).
+      lv_lastdock = lt_ord_full_ruck-dockdate.
+
+*--- return-counter in der Form <serialzähler>/<subzähler>
+      lv_countsub = lv_count2 + 1.
+      WRITE lv_countsub TO lv_subcount LEFT-JUSTIFIED.
+      CONCATENATE lv_sercount'/' lv_subcount INTO lt_ord_full_ruck-retcounter.
+    ENDLOOP.
+    IF NOT lv_count2 IS INITIAL.
+      WRITE lv_count2 TO gt_ord_full-retqty LEFT-JUSTIFIED.
+      CONCATENATE lv_sercount'/1' INTO gt_ord_full-retcounter.
+
+      CONCATENATE 'Rückläufer' gt_ord_full-retcounter INTO lv_text.
+      PERFORM show_progress USING 50 lv_text.
+    ELSE.
+      IF pa_ruecr = abap_true.
+        DELETE gt_ord_full.
+      ENDIF.
+    ENDIF.
+  ENDLOOP.
+
+  DELETE lt_ord_full_ruck WHERE retcounter = space.
+
+*--- Die mit Anzahl 0 durch Stern ersetzen                       "HB280210
+  LOOP AT lt_ord_full_ruck WHERE retcounter <> space AND
+                                 retqty = space.
+    lt_ord_full_ruck-retqty = '*'.
+    MODIFY lt_ord_full_ruck.
+  ENDLOOP.
+
+  APPEND LINES OF lt_ord_full_ruck TO gt_ord_full.
+
+  IF pa_vorwa EQ c_true.
+    SORT gt_ord_full BY serialrec dockdate DESCENDING.
+  ELSE.
+    SORT gt_ord_full BY serialrec dockdate ASCENDING.
+  ENDIF.
+ENDFORM.                    " SELECT_RETURNS
+*&---------------------------------------------------------------------*
+*&      Form  CREATE_Z2_MELDUNG
+*&---------------------------------------------------------------------*
+FORM create_z2_meldung USING if_objk STRUCTURE objk
+                             if_selfield TYPE slis_selfield.
+  DATA: lwa_riqs5            LIKE riqs5,
+        lwa_viqmel           LIKE viqmel,
+        lwa_notifheader_save LIKE bapi2080_nothdre,
+        lv_okcode            LIKE t185-fcode,
+        lv_answer.
+
+  DATA: lwa_caufv LIKE caufv,
+        lwa_afih  LIKE afih,
+        lwa_iloa  LIKE iloa.
+
+  DATA: lt_return LIKE bapiret2 OCCURS 0 WITH HEADER LINE.
+
+  CLEAR: lwa_riqs5,
+         lwa_viqmel,
+         lv_okcode.
+
+  CLEAR lwa_caufv.
+  SELECT SINGLE * FROM caufv INTO lwa_caufv WHERE aufnr = gt_ord_full-fanumber.
+
+  CLEAR lwa_afih.
+  SELECT SINGLE * FROM afih INTO lwa_afih WHERE aufnr = gt_ord_full-fanumber.
+
+  CLEAR lwa_iloa.
+  SELECT SINGLE * FROM iloa INTO lwa_iloa WHERE iloan = lwa_afih-iloan.
+
+  CLEAR lwa_riqs5.
+
+  lwa_riqs5-deviceid = lwa_afih-deviceid.
+  lwa_riqs5-tplnr = lwa_iloa-tplnr.
+  lwa_riqs5-bautl = lwa_afih-bautl.
+  lwa_riqs5-qmtxt = lwa_caufv-ktext.
+
+
+  IF lwa_afih-priok IS INITIAL.
+    lwa_riqs5-strmn = lwa_caufv-gstrp.
+    lwa_riqs5-ltrmn = lwa_caufv-gltrp.
+    lwa_riqs5-strur = lwa_caufv-gsuzp.
+    lwa_riqs5-ltrur = lwa_caufv-gluzp.
+
+  ELSE.
+    lwa_riqs5-strmn = sy-datlo.
+    lwa_riqs5-strur = sy-timlo.
+  ENDIF.
+
+  lwa_riqs5-priok = lwa_afih-priok.
+
+  lwa_riqs5-arbplwerk = lwa_caufv-wawrk.
+  lwa_riqs5-arbpl = lwa_afih-gewrk.
+  lwa_riqs5-crobjty = lwa_afih-pm_objty.
+  lwa_riqs5-kdauf = lwa_caufv-kdauf.
+  lwa_riqs5-kdpos = lwa_caufv-kdpos.
+  lwa_riqs5-iwerk = lwa_afih-iwerk.
+  lwa_riqs5-ingrp = lwa_afih-ingpr.
+
+  lwa_riqs5-equnr = if_objk-equnr.
+  lwa_riqs5-serialnr = if_objk-sernr.
+  lwa_riqs5-matnr = if_objk-matnr.
+  lwa_riqs5-bautl = if_objk-bautl.
+  lwa_riqs5-uii = if_objk-uii.
+
+  CALL FUNCTION 'IQS0_CREATE_NOTIF_TO_ORDER'
+    EXPORTING
+      i_aufnr                    = gt_ord_full-fanumber
+      i_tcode                    = 'ZW51Z2'
+      i_qmart                    = 'Z2'
+      i_riqs5                    = lwa_riqs5
+    IMPORTING
+      e_viqmel                   = lwa_viqmel
+      e_okcode                   = lv_okcode
+    EXCEPTIONS
+      invalid_entry              = 1
+      notification_not_in_buffer = 2
+      OTHERS                     = 3.
+
+  IF sy-subrc NE 0.
+    EXIT.
+  ENDIF.
+
+  CLEAR lv_answer.
+
+  CALL FUNCTION 'POPUP_TO_CONFIRM'
+    EXPORTING
+      titlebar       = TEXT-t09  "Meldung speichern
+      text_question  = TEXT-t10  "Soll die Meldung gesichert werden?
+    IMPORTING
+      answer         = lv_answer
+    EXCEPTIONS
+      text_not_found = 1
+      OTHERS         = 2.
+
+  CASE lv_answer.
+    WHEN '1'.
+
+      CLEAR lt_return. REFRESH lt_return.
+      CLEAR lwa_notifheader_save.
+      CALL FUNCTION 'BAPI_ALM_NOTIF_SAVE'      "#EC CI_USAGE_OK[2438131]     "INS S4CONV ECC - HPC(2508-614)
+        EXPORTING
+          number      = lwa_viqmel-qmnum
+        IMPORTING
+          notifheader = lwa_notifheader_save
+        TABLES
+          return      = lt_return.
+
+      CLEAR lt_return.
+      READ TABLE lt_return WITH KEY type = 'E'.
+      CHECK sy-subrc NE 0.
+
+      CLEAR lt_return. REFRESH lt_return.
+      CALL FUNCTION 'BAPI_TRANSACTION_COMMIT'
+        EXPORTING
+          wait   = c_true
+        IMPORTING
+          return = lt_return.
+
+      CLEAR lt_return.
+      READ TABLE lt_return WITH KEY type = 'E'.
+      CHECK sy-subrc NE 0.
+
+      CLEAR: if_objk-equnr,
+             if_objk-bautl,
+             if_objk-iloan,
+             if_objk-sortf,
+             if_objk-bearb,
+             if_objk-sernr,
+             if_objk-matnr.
+
+      if_objk-ihnum = lwa_notifheader_save-notif_no.
+      MODIFY objk FROM if_objk.
+      COMMIT WORK AND WAIT.
+
+      PERFORM update_z2_data USING lwa_notifheader_save-notif_no.
+      PERFORM get_data.
+      if_selfield-refresh = 'X'.
+      EXIT.
+
+    WHEN OTHERS.
+
+  ENDCASE.
+
+ENDFORM.                    " CREATE_Z2_MELDUNG
+*&---------------------------------------------------------------------*
+*&      Form  MODIFY_Z2_MELDUNG
+*&---------------------------------------------------------------------*
+FORM modify_z2_meldung USING if_qmnum
+                             if_selfield TYPE slis_selfield.
+  DATA: lwa_qmel  LIKE qmel,
+        lwa_jest  LIKE jest,
+        lwa_tj02t LIKE tj02t.
+
+  SET PARAMETER ID 'IQM' FIELD if_qmnum.
+
+  CALL FUNCTION 'RS_HDSYS_CALL_TC_VARIANT'
+    EXPORTING
+      tcode                     = 'IW52'
+      variant                   = 'ZW52_Z2'
+      i_flag_client_independent = c_true
+      call_mode                 = c_true
+      i_flag_skip_first_screen  = c_true
+    EXCEPTIONS
+      no_variant                = 1
+      no_authority_tcode        = 2
+      OTHERS                    = 3.
+
+  WAIT UP TO 1 SECONDS.
+
+  CLEAR lwa_qmel.
+  SELECT SINGLE * FROM qmel INTO lwa_qmel
+  WHERE qmnum = if_qmnum.
+
+  IF NOT lwa_qmel-kzloesch IS INITIAL.
+* Service notif. deleted
+    PERFORM delete_z2_data USING if_qmnum.
+    PERFORM get_data.
+    if_selfield-refresh = 'X'.
+    EXIT.
+  ENDIF.
+
+  CLEAR lwa_tj02t.
+  SELECT SINGLE * FROM tj02t INTO lwa_tj02t WHERE txt04 = 'LÖVM'.
+
+  CLEAR lwa_jest.
+  SELECT SINGLE * FROM jest INTO lwa_jest
+  WHERE objnr = lwa_qmel-objnr AND
+        stat = lwa_tj02t-istat AND
+        inact = ' '.
+
+  IF sy-subrc EQ 0.
+* Service notif. deleted
+    PERFORM delete_z2_data USING if_qmnum.
+    PERFORM get_data.
+    if_selfield-refresh = 'X'.
+  ELSEIF sy-subrc NE 0.
+* Service notif. changed
+    PERFORM update_z2_data USING if_qmnum.
+    PERFORM get_data.
+    if_selfield-refresh = 'X'.
+  ENDIF.
+
+
+ENDFORM.                    " MODIFY_Z2_MELDUNG
+*&---------------------------------------------------------------------*
+*&      Form  INCREMENT_STATISTIC
+*&---------------------------------------------------------------------*
+FORM increment_statistic .       "MK 25.06.2020 Ticket 2006-849
+
+  IF s_orded[] IS INITIAL AND s_orddt[] IS INITIAL.
+    EXIT.
+  ENDIF.
+
+  DATA: ls_zordview_query TYPE zordview_query,
+        lv_dat            TYPE sy-datum VALUE '20180101',
+        lv_dat2           TYPE sy-datum.
+
+  RANGES : lr_date FOR sy-datum.
+  lr_date-sign = 'I'.
+  lr_date-option = 'BT'.
+  lr_date-low = '00000000'.
+  lr_date-high = '20171231'.
+  APPEND lr_date.
+
+  LOOP AT s_orded.
+    IF s_orded-sign = 'I'.
+      CASE s_orded-option.
+        WHEN 'EQ'.
+          IF s_orded-low IN lr_date.
+            lv_dat = s_orded-low.
+            EXIT.
+          ENDIF.
+        WHEN 'BT'.
+          IF s_orded-low IN lr_date OR s_orded-high IN lr_date.
+            lv_dat = lv_dat - 1. "Hauptsache kleiner
+            EXIT.
+          ENDIF.
+        WHEN 'GT'.
+          lv_dat2 = s_orded-low + 1.
+          IF lv_dat2 IN lr_date.
+            lv_dat = lv_dat - 1. "Hauptsache kleiner
+            EXIT.
+          ENDIF.
+        WHEN 'LT'.
+          lv_dat2 = s_orded-low - 1.
+          IF lv_dat2 IN lr_date.
+            lv_dat = lv_dat - 1. "Hauptsache kleiner
+            EXIT.
+          ENDIF.
+        WHEN 'GE' OR 'LE'.
+          lv_dat2 = s_orded-low.
+          IF lv_dat2 IN lr_date.
+            lv_dat = lv_dat - 1. "Hauptsache kleiner
+            EXIT.
+          ENDIF.
+      ENDCASE.
+    ENDIF.
+  ENDLOOP.
+
+  IF lv_dat GE '20180101'.
+    LOOP AT s_orddt.
+      IF s_orddt-sign = 'I'.
+        CASE s_orddt-option.
+          WHEN 'EQ'.
+            IF s_orddt-low IN lr_date.
+              lv_dat = s_orddt-low.
+              EXIT.
+            ENDIF.
+          WHEN 'BT'.
+            IF s_orddt-low IN lr_date OR s_orddt-high IN lr_date.
+              lv_dat = lv_dat - 1. "Hauptsache kleiner
+              EXIT.
+            ENDIF.
+          WHEN 'GT'.
+            lv_dat2 = s_orddt-low + 1.
+            IF lv_dat2 IN lr_date.
+              lv_dat = lv_dat - 1. "Hauptsache kleiner
+              EXIT.
+            ENDIF.
+          WHEN 'LT'.
+            lv_dat2 = s_orddt-low - 1.
+            IF lv_dat2 IN lr_date.
+              lv_dat = lv_dat - 1. "Hauptsache kleiner
+              EXIT.
+            ENDIF.
+          WHEN 'GE' OR 'LE'.
+            lv_dat2 = s_orddt-low.
+            IF lv_dat2 IN lr_date.
+              lv_dat = lv_dat - 1. "Hauptsache kleiner
+              EXIT.
+            ENDIF.
+        ENDCASE.
+      ENDIF.
+    ENDLOOP.
+  ENDIF.
+
+  IF lv_dat < '20180101'.
+    SELECT SINGLE * FROM zordview_query INTO ls_zordview_query.
+    IF sy-subrc = 0.
+      ls_zordview_query-anz_old_query = ls_zordview_query-anz_old_query + 1.
+      UPDATE zordview_query FROM ls_zordview_query.
+    ELSE.
+      ls_zordview_query-anz_old_query = 1.
+      INSERT zordview_query FROM ls_zordview_query.
+    ENDIF.
+  ENDIF.
+
+ENDFORM.

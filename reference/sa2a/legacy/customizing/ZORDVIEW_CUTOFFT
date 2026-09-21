@@ -1,0 +1,16 @@
+@EndUserText.label : 'Steuertabelle CutOff-Zeiten Liefertermin Soll'
+@AbapCatalog.enhancement.category : #EXTENSIBLE_CHARACTER
+@AbapCatalog.tableCategory : #TRANSPARENT
+@AbapCatalog.deliveryClass : #A
+@AbapCatalog.dataMaintenance : #ALLOWED
+define table zordview_cutofft {
+
+  key mandt : mandt not null;
+  @AbapCatalog.foreignKey.screenCheck : true
+  key wktnr : wktnr not null
+    with foreign key vbuk
+      where mandt = zordview_cutofft.mandt
+        and vbeln = zordview_cutofft.wktnr;
+  ab_uzeit  : syuzeit;
+
+}

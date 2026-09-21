@@ -1,0 +1,17 @@
+@EndUserText.label : 'Steuertabelle /CELLAG/ORDVIEW Tag1 kein Basistag'
+@AbapCatalog.enhancement.category : #EXTENSIBLE_CHARACTER
+@AbapCatalog.tableCategory : #TRANSPARENT
+@AbapCatalog.deliveryClass : #C
+@AbapCatalog.dataMaintenance : #ALLOWED
+define table zordview_cust2 {
+
+  key mandt : mandt not null;
+  key wktnr : wktnr not null;
+  @AbapCatalog.foreignKey.keyType : #KEY
+  @AbapCatalog.foreignKey.screenCheck : true
+  key kvgr1 : kvgr1 not null
+    with foreign key tvv1
+      where mandt = zordview_cust2.mandt
+        and kvgr1 = zordview_cust2.kvgr1;
+
+}

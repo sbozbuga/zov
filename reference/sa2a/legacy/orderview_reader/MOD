@@ -1,0 +1,35 @@
+*&---------------------------------------------------------------------*
+*&  Include           /CELLAG/ORDERVIEW_MOD
+*&---------------------------------------------------------------------*
+*&---------------------------------------------------------------------*
+*&      Module  STATUS_0300  OUTPUT
+*&---------------------------------------------------------------------*
+MODULE status_0300 OUTPUT.
+  SET PF-STATUS '0300'.
+  SET TITLEBAR '0300' WITH gt_ord_full-qmnum gt_ord_full-fenum gt_ord_full-counter.
+
+  CLEAR gt_tq80.
+  READ TABLE gt_tq80 WITH KEY qmart = 'Z2'.
+
+  CLEAR gwa_qpct.
+  READ TABLE gt_qpct INTO gwa_qpct WITH KEY katalogart = gt_tq80-mfkat   "katalogart = 'A'
+                                            codegruppe = 'ZRGSIST'
+                                            code = gt_ord_full-status
+  BINARY SEARCH.
+
+  CLEAR gv_liefplan.
+  IF NOT gt_ord_full-actualcommitdate IS INITIAL.
+    CONCATENATE gt_ord_full-actualcommitdate '=' gt_ord_full-deliverplan INTO
+    gv_liefplan SEPARATED BY space.
+  ENDIF.
+ENDMODULE.                 " STATUS_0300  OUTPUT
+*&---------------------------------------------------------------------*
+*&      Module  USER_COMMAND_0300  INPUT
+*&---------------------------------------------------------------------*
+MODULE user_command_0300 INPUT.
+  CASE gv_okcode_0300.
+    WHEN 'CANC' OR 'OKAY'.
+      LEAVE TO SCREEN 0.
+  ENDCASE.
+
+ENDMODULE.                 " USER_COMMAND_0300  INPUT

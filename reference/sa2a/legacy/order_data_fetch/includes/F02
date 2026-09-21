@@ -1,0 +1,2906 @@
+*----------------------------------------------------------------------*
+***INCLUDE /CELLAG/ORDER_DATA_FETCH_F02 .
+*----------------------------------------------------------------------*
+*&---------------------------------------------------------------------*
+*&      Form  SET_FASTART_DATE
+*&---------------------------------------------------------------------*
+*       Versorgen Feld FASTART aus Änderungsbelegen
+*       Lediglich die ohne Datum
+*----------------------------------------------------------------------*
+FORM set_fastart_date .
+
+  TYPES:
+    BEGIN OF tys_vbep,
+      vbeln LIKE vbep-vbeln,
+      posnr LIKE vbep-posnr,
+      etenr LIKE vbep-etenr,
+      edatu LIKE vbep-edatu,
+      bmeng LIKE vbep-bmeng,
+      aufnr LIKE vbep-aufnr,
+      autyp LIKE aufk-autyp,
+      erdat LIKE aufk-erdat,
+      idat1 LIKE aufk-idat1,
+      idat2 LIKE aufk-idat2,
+      objnr LIKE aufk-objnr,
+      kostv TYPE aufk-kostv,                                "HB040618
+      gltrp LIKE afko-gltrp,
+      rsnum LIKE afko-rsnum,
+      aufpl LIKE afko-aufpl,
+      obknr LIKE ser02-obknr,
+    END OF tys_vbep,
+    tyt_vbep   TYPE STANDARD TABLE OF tys_vbep,
+    tyt_vbep_h TYPE HASHED TABLE OF tys_vbep WITH UNIQUE KEY aufnr,
+
+    BEGIN OF tys_objectid,
+      qmnum    TYPE qmnum,
+      fenum    TYPE fenum,
+      counter  TYPE cim_count,
+      objectid TYPE cdobjectv,
+      kostv    TYPE aufkostv,                               "HB040618
+    END OF tys_objectid,
+    tyt_objectid TYPE HASHED TABLE OF tys_objectid WITH UNIQUE KEY qmnum fenum counter,
+
+    BEGIN OF tys_cdpos,
+      objectid TYPE cdobjectv,
+      changenr TYPE cdchangenr,
+    END OF tys_cdpos,
+    tyt_cdpos TYPE STANDARD TABLE OF tys_cdpos,
+
+    BEGIN OF tys_cdhdr,
+      objectid TYPE cdobjectv,
+      changenr TYPE cdchangenr,
+      udate    TYPE cddatum,
+    END OF tys_cdhdr,
+    tyt_cdhdr   TYPE STANDARD TABLE OF tys_cdhdr,
+    tyt_cdhdr_h TYPE HASHED TABLE OF tys_cdhdr WITH UNIQUE KEY objectid.
+
+  DATA:
+    lt_vbep      TYPE tyt_vbep,
+    lt_vbep_h    TYPE tyt_vbep_h,
+    lt_objectid  TYPE tyt_objectid,
+    lt_cdpos     TYPE tyt_cdpos,
+    lt_cdhdr     TYPE tyt_cdhdr,
+    lt_cdhdr_h   TYPE tyt_cdhdr_h,
+    lt_orderview TYPE tyt_orderview,
+
+    ls_objectid  TYPE tys_objectid,
+
+    lv_count     TYPE i,
+    lv_count2    TYPE i.
+
+  FIELD-SYMBOLS:
+    <ls_orderview> LIKE LINE OF gt_orderview,
+    <ls_vbep>      TYPE tys_vbep,
+    <ls_objectid>  TYPE tys_objectid,
+    <ls_cdhdr>     TYPE tys_cdhdr.
+
+  lt_vbep[] =  gt_vbep_aux[].
+  SORT lt_vbep BY aufnr.
+  DELETE ADJACENT DUPLICATES FROM lt_vbep COMPARING aufnr.
+  lt_vbep_h[] = lt_vbep[].
+
+  "umkopieren in lokale Tabelle und nur die ohne FASTART belassen
+  lt_orderview[] = gt_orderview[].
+  DELETE lt_orderview WHERE fanumber = space
+                            OR ( fanumber > space AND
+                                 fastart  > '19000101' ). "bereits gesetzt
+*                            OR ( fanumber > space AND                       "HB231018
+*                                 faend    > '19000101' ). "bereits beendet
+
+  syst-tfill = lines( lt_orderview ).
+  PERFORM prot_line USING syst-tfill 'Ohne FASTART   Anzahl                         :'.
+
+  "objectid bauen
+  LOOP AT lt_orderview ASSIGNING <ls_orderview>.
+    READ TABLE lt_vbep_h ASSIGNING <ls_vbep> WITH TABLE KEY aufnr = <ls_orderview>-fanumber.
+    IF sy-subrc = 0.
+      ls_objectid-qmnum   = <ls_orderview>-qmnum.
+      ls_objectid-fenum   = <ls_orderview>-fenum.
+      ls_objectid-counter = <ls_orderview>-counter.
+      ls_objectid-kostv   = <ls_vbep>-kostv.                "HB040618
+      CONCATENATE sy-mandt <ls_vbep>-autyp <ls_vbep>-aufnr INTO ls_objectid-objectid.
+      INSERT ls_objectid INTO TABLE lt_objectid.
+    ENDIF.
+  ENDLOOP.
+
+  CLEAR: lt_vbep_h[],
+         lt_vbep[].
+
+  CHECK NOT lt_objectid[] IS INITIAL.
+
+  SELECT objectid
+         changenr
+    FROM cdpos
+    INTO TABLE lt_cdpos
+    FOR ALL ENTRIES IN lt_objectid
+    WHERE objectclas = 'ORDER'
+      AND objectid  = lt_objectid-objectid
+      AND fname     = 'STEUS'
+      AND chngind   = 'U'
+      AND value_new = 'ZM02'
+      AND value_old = 'ZM01'.
+
+  CHECK NOT lt_cdpos[] IS INITIAL.
+  syst-tfill = lines( lt_cdpos ).
+  PERFORM prot_line USING syst-tfill 'Wechsel ZM01->ZM02                            :'.
+
+  SELECT objectid
+         changenr
+         udate
+    FROM cdhdr
+    INTO TABLE lt_cdhdr
+    FOR ALL ENTRIES IN lt_cdpos
+    WHERE objectclas = 'ORDER'
+      AND objectid = lt_cdpos-objectid
+      AND changenr = lt_cdpos-changenr.
+  "neueste Änderung
+  SORT lt_cdhdr BY objectid ASCENDING
+                   udate    DESCENDING.
+  DELETE ADJACENT DUPLICATES FROM lt_cdhdr COMPARING objectid.
+  lt_cdhdr_h[] = lt_cdhdr[].
+  CLEAR: lt_cdhdr[],
+         lt_cdpos[].
+
+  "In Originaltabelle ergänzen
+  LOOP AT gt_orderview ASSIGNING <ls_orderview>
+                       WHERE fanumber > space
+                         AND fastart IS INITIAL.
+    ADD 1 TO lv_count2.
+    READ TABLE lt_objectid ASSIGNING <ls_objectid>
+                           WITH TABLE KEY qmnum   = <ls_orderview>-qmnum
+                                          fenum   = <ls_orderview>-fenum
+                                          counter = <ls_orderview>-counter.
+    IF sy-subrc = 0.
+      <ls_orderview>-kostv = <ls_objectid>-kostv.           "HB040618
+      READ TABLE lt_cdhdr_h ASSIGNING <ls_cdhdr>
+                            WITH TABLE KEY objectid = <ls_objectid>-objectid.
+      IF sy-subrc = 0.
+        ADD 1 TO lv_count.
+        <ls_orderview>-fastart = <ls_cdhdr>-udate.
+      ENDIF.
+    ENDIF.
+  ENDLOOP.
+
+  PERFORM prot_line USING lv_count2 'Vorgänge FASTART leer                         :'.
+  PERFORM prot_line USING lv_count 'FASTART gesetzt                               :'.
+
+
+ENDFORM.                    " SET_FASTART_DATE
+*&---------------------------------------------------------------------*
+*&      Form  GET_RETOURE_ZIL
+*&---------------------------------------------------------------------*
+*       HB310817: fehlen Matnr, Serialnr zur Retoure 1708-755
+*       analog YLE01 beschaffen
+*&---------------------------------------------------------------------*
+*       HB210622 auch ohne Serialnr
+*----------------------------------------------------------------------*
+FORM get_retoure_zil .
+
+  TYPES:
+    BEGIN OF tys_likp,
+      vbeln     TYPE vbeln_vl,
+      wadat_ist TYPE wadat_ist,
+      bldat     TYPE bldat,
+    END OF tys_likp,
+    tyt_likp TYPE HASHED TABLE OF tys_likp WITH UNIQUE KEY vbeln,
+
+    BEGIN OF tys_lips_ret,
+      vbeln     TYPE vbeln_vl,
+      posnr     TYPE posnr_vl,
+      matnr     TYPE matnr,
+      erdat     TYPE erdat,
+      wadat_ist TYPE wadat_ist,
+      bldat     TYPE bldat,
+    END OF tys_lips_ret,
+    tyt_lips_ret TYPE HASHED TABLE OF tys_lips_ret
+                         WITH UNIQUE KEY vbeln
+                                         posnr,
+
+    BEGIN OF tys_ser01,
+      obknr   TYPE ser01-obknr,
+      lief_nr TYPE ser01-lief_nr,
+      posnr   TYPE ser01-posnr,
+      equnr   TYPE objk-equnr,
+    END OF tys_ser01,
+    tyt_ser01   TYPE STANDARD TABLE OF tys_ser01,
+    tyt_ser01_h TYPE HASHED TABLE OF tys_ser01 WITH UNIQUE KEY lief_nr
+                                                             posnr,
+
+    BEGIN OF tys_equi,
+      equnr TYPE equi-equnr,
+      serge TYPE equi-serge,  "Herstellerserialnr
+      sernr TYPE equi-sernr,
+    END OF tys_equi,
+    tyt_equi TYPE HASHED TABLE OF tys_equi WITH UNIQUE KEY equnr.
+
+
+  DATA:
+    lt_orderview TYPE tyt_orderview,
+    lv_count     TYPE i,
+
+    lt_vbfa      TYPE tyt_vbfa,
+    lt_vbfa_h    TYPE tyt_vbfa_h,
+    lt_lips_ret  TYPE tyt_lips_ret,
+    lt_ser01     TYPE tyt_ser01,
+    lt_ser01_h   TYPE tyt_ser01_h,
+    lt_equi      TYPE tyt_equi.
+
+
+  FIELD-SYMBOLS:
+    <ls_zordview_cust1> TYPE zordview_cust1,
+    <ls_orderview>      LIKE LINE OF gt_orderview,
+    <ls_orderview2>     LIKE LINE OF gt_orderview,
+    <ls_vbfa>           TYPE tys_vbfa,
+    <ls_lips>           TYPE tys_lips_ret,
+    <ls_ser01>          TYPE tys_ser01,
+    <ls_equi>           TYPE tys_equi.
+
+
+  "ZIL-Sätze separieren
+  LOOP AT gt_orderview ASSIGNING <ls_orderview>
+                       WHERE otgrp = 'ZIL'.
+    INSERT INITIAL LINE INTO TABLE lt_orderview ASSIGNING <ls_orderview2>.
+    <ls_orderview2> = <ls_orderview>.
+    DELETE gt_orderview.  "raus
+  ENDLOOP.
+
+  CHECK lt_orderview[] IS NOT INITIAL.
+
+  SELECT vbelv
+         posnv
+         vbeln
+         posnn
+    FROM vbfa
+    INTO TABLE lt_vbfa
+    FOR ALL ENTRIES IN lt_orderview
+    WHERE vbelv   = lt_orderview-vbeln
+      AND posnv   = lt_orderview-posnr
+      AND vbtyp_n = 'T'.    "Retourenlieferung zum Auftrag
+
+  IF lt_vbfa[] IS NOT INITIAL.
+    SORT lt_vbfa BY vbelv ASCENDING
+                    posnv ASCENDING
+                    vbeln DESCENDING.   "neuester nehmen, falls mehrere
+    DELETE ADJACENT DUPLICATES FROM lt_vbfa COMPARING vbelv posnv.
+    lt_vbfa_h[] = lt_vbfa[].
+    CLEAR:   lt_vbfa[].
+
+    PERFORM prot_line USING syst-tfill 'ZIL Retouren ermittelt                        :'.
+
+    "Lieferscheindaten ermittelt
+    SELECT a~vbeln
+           a~posnr
+           a~matnr
+           b~erdat                                          "HB180216
+           b~wadat_ist
+           b~bldat                                          "MK260716
+      FROM lips AS a
+        INNER JOIN likp AS b
+          ON a~vbeln = b~vbeln
+      INTO TABLE lt_lips_ret
+      FOR ALL ENTRIES IN lt_vbfa_h
+      WHERE a~vbeln = lt_vbfa_h-vbeln
+        AND a~posnr = lt_vbfa_h-posnn.
+
+    IF lt_lips_ret[] IS NOT INITIAL.
+
+      "Serialnummern Retoure
+      SELECT a~obknr
+             a~lief_nr
+             a~posnr
+             b~equnr
+        FROM ser01 AS a
+          LEFT OUTER JOIN objk AS b
+          ON b~obknr = a~obknr
+        INTO TABLE lt_ser01
+        FOR ALL ENTRIES IN lt_lips_ret
+        WHERE a~lief_nr = lt_lips_ret-vbeln
+          AND a~posnr   = lt_lips_ret-posnr.
+      SORT lt_ser01 BY lief_nr
+                       posnr.
+      DELETE ADJACENT DUPLICATES FROM lt_ser01 COMPARING lief_nr
+                                                         posnr.
+      lt_ser01_h[] = lt_ser01[].
+      CLEAR: lt_ser01[].
+
+      IF lt_ser01_h[] IS NOT INITIAL.
+        SELECT equnr
+               serge
+               sernr
+          FROM equi
+          INTO TABLE lt_equi
+          FOR ALL ENTRIES IN lt_ser01_h
+          WHERE equnr = lt_ser01_h-equnr.
+      ENDIF.  "  IF lt_ser01_h[] IS NOT INITIAL.
+
+      "Retourenanlieferungen und Serialnr ergänzen ergänzen
+      LOOP AT lt_orderview ASSIGNING <ls_orderview>.
+        READ TABLE lt_vbfa_h ASSIGNING <ls_vbfa> WITH TABLE KEY vbelv = <ls_orderview>-vbeln
+                                                                posnv = <ls_orderview>-posnr.
+        IF sy-subrc = 0.
+          <ls_orderview>-retoure = <ls_vbfa>-vbeln.
+          "Receivedate?  gt_orderview-receivedate = gt_lips_ret-wadat_ist.
+          "Dockdate?  likp-bldat
+          READ TABLE lt_lips_ret ASSIGNING <ls_lips> WITH TABLE KEY vbeln = <ls_vbfa>-vbeln
+                                                                    posnr = <ls_vbfa>-posnn.
+          IF sy-subrc = 0.
+            <ls_orderview>-receivedate = <ls_lips>-wadat_ist.
+            <ls_orderview>-dockdate    = <ls_lips>-bldat.
+            <ls_orderview>-matnr_in    = <ls_lips>-matnr.
+
+            "Form Build_calculated_Fields wird nicht durchlaufen; deshalb hier Closed setzen
+            IF NOT <ls_lips>-wadat_ist IS INITIAL.
+              <ls_orderview>-orderstatecompl = c_closed.
+              <ls_orderview>-dateclosed      = <ls_lips>-wadat_ist.
+
+              "Archivkennzeichen, falls keine Faktura erwartet      HB090617
+              "1706-096 Codegruppe ZIL bekommt kein Archivkennzeichen
+              READ TABLE gt_zordview_cust1 ASSIGNING <ls_zordview_cust1> WITH TABLE KEY wktnr = <ls_orderview>-wktnr.
+              IF sy-subrc = 0.
+                "Archivkennzeichen setzen? auch wenn keine Faktura existiert
+                IF <ls_zordview_cust1>-no_invoic_sd = abap_true.
+                  <ls_orderview>-archivflag = abap_true.
+                ENDIF.
+
+              ELSE.  "2105-324 Unschärfe bei ZIL Meldungen Archivkz
+                "Archivflag setzen falls Gesamtstatus GBSTK  = C sitzt
+                READ TABLE gt_vbap_aux WITH KEY qmnum = <ls_orderview>-qmnum
+                                                fenum = <ls_orderview>-fenum BINARY SEARCH.
+
+                IF sy-subrc EQ 0.
+                  IF gt_vbap_aux-gbstk = cl_wsso_wd_as_dlv=>gc_sd_doc_status_complete.  "C
+                    <ls_orderview>-archivflag = abap_true.
+                    <ls_orderview>-gbstk = cl_wsso_wd_as_dlv=>gc_sd_doc_status_complete.  "C
+                  ENDIF.
+                ENDIF.
+              ENDIF.
+            ENDIF.
+
+            "Serialnr-Daten
+            READ TABLE lt_ser01_h ASSIGNING <ls_ser01> WITH TABLE KEY lief_nr = <ls_lips>-vbeln
+                                                                      posnr   = <ls_lips>-posnr.
+            IF sy-subrc = 0.
+              READ TABLE lt_equi ASSIGNING <ls_equi> WITH TABLE KEY equnr = <ls_ser01>-equnr.
+              IF sy-subrc = 0.
+                <ls_orderview>-serialrec       = <ls_equi>-serge.
+                <ls_orderview>-sernrrec        = <ls_equi>-sernr.
+                <ls_orderview>-equipmentnummer = <ls_equi>-equnr.
+              ENDIF.
+            ENDIF.
+          ENDIF.
+        ENDIF.
+
+      ENDLOOP.
+
+    ENDIF.  "IF lt_lips_ret[] IS NOT INITIAL.
+  ENDIF.  "IF lt_vbfa[] IS NOT INITIAL.
+
+  "wieder anhängen
+  APPEND LINES OF lt_orderview TO gt_orderview.
+
+ENDFORM.                    "get_retoure_zil
+*&---------------------------------------------------------------------*
+*&      Form  SET_SERIALREC_ORIGINAL
+*&---------------------------------------------------------------------*
+*       ursprüngliche Serialnr setzen aus /CELLAG/ZW51_SER
+*       aktualisieren gt_orderview[].
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM set_serialrec_original .
+
+  TYPES:
+    BEGIN OF tys_zw51_ser,
+      qmnum TYPE qmnum,
+      fenum TYPE felfd,
+      equnr TYPE equnr,
+      serge TYPE /cellag/serge,
+    END OF tys_zw51_ser,
+    tyt_zw51_ser  TYPE STANDARD TABLE OF tys_zw51_ser,
+    tyt_zw51_serh TYPE HASHED TABLE OF tys_zw51_ser WITH UNIQUE KEY qmnum fenum equnr.
+
+  DATA:
+    lt_orderview TYPE tyt_orderview,
+    lt_zw51_ser  TYPE tyt_zw51_ser,
+    lt_zw51_serh TYPE tyt_zw51_serh,
+
+    lv_equnr     TYPE equnr,
+
+    lv_count     TYPE i.
+
+  FIELD-SYMBOLS:
+    <ls_orderview> LIKE LINE OF gt_orderview,
+    <ls_zw51_ser>  TYPE tys_zw51_ser.
+
+  lt_orderview[] = gt_orderview[].
+  SORT lt_orderview BY qmnum.
+  DELETE ADJACENT DUPLICATES FROM lt_orderview COMPARING qmnum.
+  CLEAR: lt_zw51_ser[].
+
+  SELECT qmnum
+         fenum
+         equnr
+         serge
+    FROM /cellag/zw51_ser
+    INTO TABLE lt_zw51_ser
+    FOR ALL ENTRIES IN gt_orderview
+    WHERE qmnum = gt_orderview-qmnum
+      AND equnr > '000000000000000000'.
+  IF NOT lt_zw51_ser[] IS INITIAL.                          "HB040222
+    SORT lt_zw51_ser BY qmnum fenum equnr.
+    DELETE ADJACENT DUPLICATES FROM lt_zw51_ser COMPARING qmnum fenum equnr.
+    lt_zw51_serh[] = lt_zw51_ser[].
+
+    LOOP AT gt_orderview ASSIGNING <ls_orderview>.
+      lv_equnr = <ls_orderview>-sernrrec.
+      "führende 0; so gespeichert in zw51_ser
+      CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
+        EXPORTING
+          input  = lv_equnr
+        IMPORTING
+          output = lv_equnr.
+
+      READ TABLE lt_zw51_serh WITH TABLE KEY qmnum = <ls_orderview>-qmnum
+                                             fenum = <ls_orderview>-fenum
+                                             equnr = lv_equnr
+                             ASSIGNING <ls_zw51_ser>.
+      IF sy-subrc = 0.
+        IF <ls_orderview>-serialrec <> <ls_zw51_ser>-serge.
+          ADD 1 TO lv_count.
+          "Ausgabe
+*        IF lv_count < 10.
+*          WRITE:/ <ls_orderview>-qmnum, <ls_orderview>-fenum, <ls_orderview>-sernrrec.
+*          WRITE:/ 'akt:', <ls_orderview>-serialrec, 'org:', <ls_zw51_ser>-serge.
+*        ENDIF.
+
+          <ls_orderview>-serialrec = <ls_zw51_ser>-serge.
+        ENDIF.
+      ENDIF.
+    ENDLOOP.
+
+    PERFORM prot_line USING lv_count 'Original-Inbound-Serial gesetzt               :'.
+  ENDIF.  "IF NOT lt_zw51_ser[] IS INITIAL
+ENDFORM.                    " SET_SERIALREC_ORIGINAL
+*&---------------------------------------------------------------------*
+*&      Form  HANDLE_ZFL
+*&---------------------------------------------------------------------*
+*       Behandlung Codegruppe ZFL
+*       Closed-Prüfung
+*-----------------------------------------------------------------------
+*       1710-456 Axa Unterpos Lieferungen      HB221017
+*       Serialnr nachtragen; Posnr Lieferung korrigieren
+*       Daten aus gt_lips_aux
+*-----------------------------------------------------------------------
+*       2010-1008 ORDERVIEW New process type ZMTO_ZMT1  HB160621
+*       ZMTO ist ein Forwärts Logistik Prozess wie ZFL
+*       ZMT1 Verkaufsbeleg und eine Rechnung. Keine Lieferung
+*----------------------------------------------------------------------*
+FORM handle_zfl .
+
+  TYPES:
+    BEGIN OF tys_lips_lif.
+*        vbeln LIKE likp-vbeln,
+*        posnr LIKE lips-posnr,
+*        matnr LIKE lips-matnr,
+*        werks LIKE lips-werks,
+*        lgort LIKE lips-lgort,
+*        lfimg LIKE lips-lfimg,
+*        vgbel LIKE lips-vgbel,
+*        vgpos LIKE lips-vgpos,
+*        /cellag/akz LIKE lips-/cellag/akz,
+*        uecha TYPE uecha,                                   "HB201017
+*        vbtyp LIKE likp-vbtyp,
+*        vsbed LIKE likp-vsbed,
+*        bldat LIKE likp-bldat,
+*        tddat LIKE likp-tddat,
+*        wadat_ist LIKE likp-wadat_ist,
+*        tduhr LIKE likp-tduhr,
+*        wbsta LIKE vbup-wbsta,
+*        obknr LIKE ser01-obknr,
+*        route TYPE route,                                   "HB270614
+*        erdat TYPE erdat,                                   "HB060216
+*        edatu LIKE vbep-edatu,
+*        equnr LIKE objk-equnr,
+*        sernr LIKE objk-sernr,
+*        serge LIKE equi-serge,
+      INCLUDE STRUCTURE gt_lips_lif.
+      TYPES:
+    END OF tys_lips_lif,
+    tyt_lips_lif   TYPE STANDARD TABLE OF tys_lips_lif,
+    tyt_lips_lif_h TYPE HASHED TABLE OF tys_lips_lif WITH UNIQUE KEY vgbel vgpos.
+
+
+
+  DATA:
+    lv_count      TYPE i,
+    lv_cutofft    TYPE syuzeit,
+
+    lt_lips_lif   TYPE tyt_lips_lif,
+    lt_lips_lif_h TYPE tyt_lips_lif_h.
+
+
+  FIELD-SYMBOLS:
+    <ls_zordview_cutofft> TYPE zordview_cutofft,
+    <ls_orderview>        LIKE LINE OF gt_orderview,
+    <ls_lips_lif>         TYPE tys_lips_lif.
+
+  "Daten aus Tabelle Lieferungen übernehmen
+  lt_lips_lif[] = gt_lips_lif[].
+  SORT lt_lips_lif BY vgbel vgpos posnr.
+  DELETE ADJACENT DUPLICATES FROM lt_lips_lif COMPARING vgbel vgpos.
+  lt_lips_lif_h[] =  lt_lips_lif[].
+  CLEAR: lt_lips_lif[].
+
+  LOOP AT gt_orderview ASSIGNING <ls_orderview>
+                       WHERE ( otgrp = 'ZFL'  OR
+                               otgrp = 'ZMT1' OR            "HB160621
+                               otgrp = 'ZMTO' OR            "HB160621
+                               otgrp = 'ZRET' OR            "HB100325
+                               otgrp = 'ZTRANS' ).          "HB100325
+
+    IF <ls_orderview>-counter > '00000001'.
+      "1712-154 Fehler bei der Vereinzelung in Orderview
+      "korrekte Werte für vereinzelte werte bereits ermittelt
+      CONTINUE.
+    ENDIF.
+    "Serialnr übernehmen; Posnr Lieferung korrigieren auf Hauptpos
+    "vgl. Form  FILL_LIPS_LIF_FIELDS
+    READ TABLE lt_lips_lif_h WITH TABLE KEY vgbel = <ls_orderview>-vbeln
+                                            vgpos = <ls_orderview>-posnr
+                             ASSIGNING <ls_lips_lif>.
+    IF sy-subrc = 0.
+      ADD 1 TO lv_count.
+      <ls_orderview>-delnoteposnr    = <ls_lips_lif>-posnr.  "Korrektur Altfälle
+
+      <ls_orderview>-serialdeliver   = <ls_lips_lif>-serge.
+      <ls_orderview>-sernrlif        = <ls_lips_lif>-sernr.
+      <ls_orderview>-lieferlager     = <ls_lips_lif>-lgort.
+      <ls_orderview>-lieferwerk      = <ls_lips_lif>-werks.
+      <ls_orderview>-deliverdate     = <ls_lips_lif>-wadat_ist.
+      <ls_orderview>-delnotenumber   = <ls_lips_lif>-vbeln.
+      <ls_orderview>-delnoteposnr    = <ls_lips_lif>-posnr.
+      <ls_orderview>-vsbed           = <ls_lips_lif>-vsbed.
+      <ls_orderview>-wbsta           = <ls_lips_lif>-wbsta.
+      <ls_orderview>-matnr_out       = <ls_lips_lif>-matnr.
+*      <ls_orderview>-kundewunschterm = <ls_lips_lif>-edatu.    "HB230918
+
+      <ls_orderview>-route           = <ls_lips_lif>-route. "HB270614
+
+
+*      IF NOT <ls_lips_lif>-tddat IS INITIAL.    "HB240418   (vorher TDUHR)
+      IF NOT <ls_lips_lif>-tduhr IS INITIAL.                "HB040320
+        "2003-114 Unschärfe Orderview -  Ready To ship Datum
+        <ls_orderview>-readytoship   = <ls_lips_lif>-tddat.
+      ENDIF.
+    ENDIF.
+
+*    PERFORM build_calculated_fields.
+    "nur Code-Extract speziell ZFL, da sonst zu viel Aktionen
+
+    IF NOT <ls_orderview>-orderdate IS INITIAL.
+      "CutOff-Zeit ermitteln aus Cust
+      lv_cutofft = '160000'.  "Default    HB190915
+      READ TABLE gt_zordview_cutofft WITH TABLE KEY wktnr = <ls_orderview>-wktnr
+                                     ASSIGNING <ls_zordview_cutofft>.
+      IF sy-subrc = 0.
+        lv_cutofft = <ls_zordview_cutofft>-ab_uzeit.
+      ENDIF.
+
+      IF <ls_orderview>-uhrzeitorder >= lv_cutofft.
+        <ls_orderview>-initcommitdate = <ls_orderview>-orderdate + 1.
+      ELSE.
+        <ls_orderview>-initcommitdate = <ls_orderview>-orderdate.
+      ENDIF.
+
+      CLEAR gt_t001w.
+      READ TABLE gt_t001w WITH KEY werks = <ls_orderview>-werks.
+
+      CALL FUNCTION 'DATE_CONVERT_TO_FACTORYDATE'
+        EXPORTING
+          date                         = <ls_orderview>-initcommitdate
+          factory_calendar_id          = gt_t001w-fabkl
+        IMPORTING
+          date                         = <ls_orderview>-initcommitdate
+        EXCEPTIONS
+          calendar_buffer_not_loadable = 1
+          correct_option_invalid       = 2
+          date_after_range             = 3
+          date_before_range            = 4
+          date_invalid                 = 5
+          factory_calendar_not_found   = 6
+          OTHERS                       = 7.
+
+*        if <ls_orderview>-otgrp = 'ZFL'.
+      "Ausnahmefall Vorwärtslogistik = Lieferterminsoll
+      <ls_orderview>-auftragsendesoll = <ls_orderview>-initcommitdate. "HB190514
+*        endif.
+    ENDIF.
+
+    IF <ls_orderview>-archivflag IS INITIAL.                "HB090115
+      IF <ls_orderview>-orderstatecompl <> c_closed.
+        IF <ls_orderview>-otgrp = 'ZFL'  OR <ls_orderview>-otgrp = 'ZMTO' OR "HB160621
+           <ls_orderview>-otgrp = 'ZRET' OR <ls_orderview>-otgrp = 'ZTRANS'. "HB100325
+          "Mit Lieferung
+          IF NOT <ls_orderview>-deliverdate IS INITIAL.
+            IF <ls_orderview>-orderstatecompl <> c_deleted.
+              <ls_orderview>-orderstatecompl = c_closed.
+            ENDIF.
+            IF <ls_orderview>-dateclosed  IS INITIAL.
+              <ls_orderview>-dateclosed = <ls_orderview>-deliverdate.
+            ENDIF.
+          ENDIF.
+        ELSEIF <ls_orderview>-otgrp = 'ZMT1'.               "HB160621
+          "keine Lieferung, nur Rechnung
+          IF NOT <ls_orderview>-rechdatum IS INITIAL.
+            IF <ls_orderview>-orderstatecompl <> c_deleted.
+              <ls_orderview>-orderstatecompl = c_closed.
+            ENDIF.
+            IF <ls_orderview>-dateclosed  IS INITIAL.
+              <ls_orderview>-dateclosed = <ls_orderview>-rechdatum.
+            ENDIF.
+          ENDIF.
+
+          "Archivkennzeichen ZMT1
+          " a) Orderstatus = C und Fakturastatus = C  oder
+          " b) Orderstatus =C und Gesamtbelegstatus des Verkaufbelegs = C
+          IF <ls_orderview>-orderstatecompl = c_closed.
+            IF <ls_orderview>-fkstk = c_closed OR
+               <ls_orderview>-gbstk = c_closed.
+              <ls_orderview>-archivflag = abap_true.
+            ENDIF.
+          ENDIF.
+        ENDIF.
+      ENDIF.
+    ENDIF.
+  ENDLOOP.
+
+  PERFORM prot_line USING lv_count 'HANDLE_ZFL Unterpos. Anzahl                   :'.
+
+ENDFORM.                    " HANDLE_ZFL
+
+*&---------------------------------------------------------------------*
+*&      Form  VEREINZELUNG
+*&---------------------------------------------------------------------*
+*       Setzen der Lieferungen und Serialnummern für Vereinzelung
+*       zurvor war: SORT gt_orderview BY qmnum fenum counter.
+*       nur bei denen die Counter > 1 haben
+*
+*       Ausgelagert, da Änderungen im alten Coding einiges an Umbau
+*       erfordern würde - sehr umständlich und altbacken programmiert!
+*
+**DATA: BEGIN OF gt_orderview OCCURS 0.
+*        INCLUDE STRUCTURE /cellag/ordview.
+*DATA: flag_vbep,
+*      flag_lif,
+*      flag_ekpo,
+*      flag_qmferm,
+*      abgru_ret        type ABGRU_VA,   "HB121213
+*      abgru_aedat      type aedat.      "HB161213
+*DATA: END OF gt_orderview.
+*
+*  delnoteprint evtl. noch ein Problem
+*----------------------------------------------------------------------*
+*    1501-223 Unschärfe in Orderview - Faktura bei Vereinzelung
+*    HERMB 17.01.2015 Rechnungsnummern fehlen ebenfalls; aus VBFA zu Lief
+*----------------------------------------------------------------------*
+FORM vereinzelung .
+
+  TYPES: BEGIN OF tys_lif,
+           qmnum TYPE qmnum,
+           fenum TYPE fenum,
+           vbeln TYPE vbeln_vl,
+           posnr TYPE posnr_vl,
+         END OF tys_lif,
+         tyt_lif   TYPE STANDARD TABLE OF tys_lif,
+         tyt_lif_h TYPE HASHED TABLE OF tys_lif WITH UNIQUE KEY qmnum fenum,
+
+         BEGIN OF tys_vbfa,
+           vbelv TYPE vbeln_von,
+           posnv TYPE posnr_von,
+           vbeln TYPE vbeln_nach,
+           posnn TYPE posnr_nach,
+           erdat TYPE erdat,
+           rfwrt TYPE rfwrt,
+           waers TYPE waers_v,
+         END OF tys_vbfa,
+         tyt_vbfa   TYPE STANDARD TABLE OF tys_vbfa,
+         tyt_vbfa_h TYPE HASHED TABLE OF tys_vbfa WITH UNIQUE KEY vbelv posnv,
+
+         BEGIN OF tys_ser01,
+           lief_nr TYPE vbeln_vl,
+           posnr   TYPE posnr_vl,
+           obknr   TYPE objknr,
+         END OF tys_ser01,
+         tyt_ser01   TYPE STANDARD TABLE OF tys_ser01,
+         tyt_ser01_h TYPE HASHED TABLE OF tys_ser01 WITH UNIQUE KEY lief_nr
+                                                                    posnr,
+
+         BEGIN OF tys_likp,
+           vbeln     TYPE vbeln_vl,
+           tddat     TYPE tddat_d,
+           tduhr     TYPE tduhr,                            "HB060222
+           wadat_ist TYPE wadat_ist,
+           erdat     TYPE erdat,
+         END OF tys_likp,
+         tyt_likp TYPE HASHED TABLE OF tys_likp WITH UNIQUE KEY vbeln,
+
+         BEGIN OF tys_objk,
+           obknr TYPE objknr,
+           obzae TYPE objza,
+           equnr TYPE equnr,
+           sernr TYPE gernr,
+         END OF tys_objk,
+         tyt_objk TYPE HASHED TABLE OF tys_objk WITH UNIQUE KEY obknr obzae,
+
+         BEGIN OF tys_mara,
+           matnr TYPE matnr,
+           mfrpn TYPE mfrpn,
+         END OF tys_mara,
+         tyt_mara TYPE HASHED TABLE OF tys_mara WITH UNIQUE KEY matnr,
+
+         BEGIN OF tys_equi,
+           equnr TYPE equnr,
+           serge TYPE serge,
+         END OF tys_equi,
+         tyt_equi TYPE HASHED TABLE OF tys_equi WITH UNIQUE KEY equnr,
+
+         BEGIN OF tys_lips,
+           vbeln TYPE vbeln_va,
+           posnr TYPE posnr_va,
+           werks TYPE werks_ext,
+           lgort TYPE lgort_d,
+           matnr TYPE matnr,
+         END OF tys_lips,
+         tyt_lips TYPE HASHED TABLE OF tys_lips WITH UNIQUE KEY vbeln posnr,
+
+         BEGIN OF tys_repdau,
+           qmnum    TYPE qmnum,
+           fenum    TYPE fenum,
+           repdauer TYPE /cellag/repdauer,
+         END OF tys_repdau,
+         tyt_repdau TYPE STANDARD TABLE OF tys_repdau.
+
+  DATA: lv_count       TYPE i,
+        lv_obzae       TYPE objza,
+
+        ls_orderview   LIKE LINE OF gt_orderview,
+        lt_orderview_s TYPE tyt_orderview_s,
+        lt_lif         TYPE tyt_lif,
+        lt_lif2        TYPE tyt_lif,
+        lt_lif_h       TYPE tyt_lif_h,
+        lt_vbfa        TYPE tyt_vbfa,
+        lt_vbfa2       TYPE tyt_vbfa,     "Faktura
+        lt_vbfa_h      TYPE tyt_vbfa_h,
+        lt_vbfa_h2     TYPE tyt_vbfa_h,   "Faktura
+        lt_ser01       TYPE tyt_ser01,
+        lt_ser01_h     TYPE tyt_ser01_h,
+        lt_likp        TYPE tyt_likp,
+        lt_objk        TYPE tyt_objk,
+        lt_mara        TYPE tyt_mara,
+        lt_equi        TYPE tyt_equi,
+        lt_lips        TYPE tyt_lips,
+        lv_repdauer    TYPE /cellag/repdauer,
+        lv_countrep0   TYPE i.
+
+
+  FIELD-SYMBOLS:
+    <ls_lif>       TYPE tys_lif,
+    <ls_lif2>      TYPE tys_lif,
+    <ls_ser01>     TYPE tys_ser01,
+    <ls_mara>      TYPE tys_mara,
+    <ls_lips>      TYPE tys_lips,
+    <ls_vbfa>      TYPE tys_vbfa,
+    <ls_likp>      TYPE tys_likp,
+    <ls_objk>      TYPE tys_objk,
+    <ls_equi>      TYPE tys_equi,
+    <ls_orderview> LIKE LINE OF gt_orderview,
+    <ls_vttp>      TYPE tys_vttp.
+
+  "Betroffene Positionen ermitteln; eigene Tabelle aufbauen
+  "genau ein Satz pro Meldungsnr + Pos
+  LOOP AT gt_orderview WHERE counter = 1.
+    INSERT INITIAL LINE INTO TABLE lt_lif ASSIGNING <ls_lif>.
+    <ls_lif>-qmnum    = gt_orderview-qmnum.
+    <ls_lif>-fenum    = gt_orderview-fenum.
+    <ls_lif>-vbeln    = gt_orderview-vbeln.
+    <ls_lif>-posnr    = gt_orderview-posnr.
+  ENDLOOP.
+
+  CHECK lt_lif[] IS NOT INITIAL.
+  syst-tfill = lines( lt_lif ).
+  PERFORM prot_line USING syst-tfill 'Vereinzelung. Pos mit Counter 1               :'.
+
+  "Problem: Lieferscheinnummer teilweise nicht vorhanden - neu bestimmen
+  "Lieferungen aus Vertriebsbelegfluss
+  "es gibt im Test mehrere Lieferscheinnummern pro Auftrag; diese entfernen (keine Vereinzelung)
+  SELECT vbelv
+         posnv
+         vbeln                      "Kundenlieferung
+         posnn
+    FROM vbfa
+    INTO CORRESPONDING FIELDS OF TABLE lt_vbfa
+    FOR ALL ENTRIES IN lt_lif
+    WHERE vbelv = lt_lif-vbeln
+      AND posnv = lt_lif-posnr
+      AND vbtyp_n = 'J'.            "Lieferung
+  SORT lt_vbfa BY vbelv posnv.
+  DELETE ADJACENT DUPLICATES FROM lt_vbfa COMPARING vbelv posnv.
+  lt_vbfa_h[] = lt_vbfa[].
+
+  "Restliche ohne bestimmen
+  LOOP AT lt_lif ASSIGNING <ls_lif>.
+    READ TABLE lt_vbfa_h ASSIGNING <ls_vbfa> WITH TABLE KEY vbelv = <ls_lif>-vbeln
+                                                            posnv = <ls_lif>-posnr.
+    IF sy-subrc = 0.
+      <ls_lif>-vbeln  = <ls_vbfa>-vbeln.   "Lieferscheinnr
+      <ls_lif>-posnr = <ls_vbfa>-posnn.    "Lieferposnr
+    ELSE.
+      CLEAR: <ls_lif>-vbeln,
+             <ls_lif>-posnr.
+    ENDIF.
+  ENDLOOP.
+
+  "Löschen die ohne Lieferung
+  DELETE lt_lif WHERE vbeln = space.
+
+  IF NOT lt_lif[] IS INITIAL.
+    "Readtoship aus TDDAT
+    SELECT vbeln
+           tddat
+           tduhr                                            "HB060222
+           wadat_ist
+           erdat
+      FROM likp
+      INTO TABLE lt_likp
+      FOR ALL ENTRIES IN lt_lif
+      WHERE vbeln = lt_lif-vbeln.
+
+    "LIPS lesen wegen Lieferlager
+    SELECT vbeln
+           posnr
+           werks
+           lgort
+           matnr
+      FROM lips
+      INTO TABLE lt_lips
+      FOR ALL ENTRIES IN lt_lif
+      WHERE vbeln = lt_lif-vbeln
+        AND posnr = lt_lif-posnr.
+
+    IF NOT lt_lips[] IS INITIAL.
+      "Materialstamm lesen
+      SELECT matnr
+             mfrpn
+        FROM mara
+        INTO TABLE lt_mara
+        FOR ALL ENTRIES IN lt_lips
+        WHERE matnr = lt_lips-matnr.
+    ENDIF.
+  ENDIF.
+
+  "--------------------------------------------------------------
+  " Fakturabelege bestimmen; Vorgänger ist Lieferung  HB170115
+  " falls jedoch Menge 1 ist die Pos noch nicht enthalten
+  " dazuselektieren/abmischen...                      HB180116
+  "--------------------------------------------------------------
+  IF NOT lt_vbfa_h[] IS INITIAL.
+    SELECT vbelv
+           posnv
+           vbeln                      "Kundenlieferung
+           posnn
+           erdat
+           rfwrt
+           waers
+      FROM vbfa
+      INTO TABLE lt_vbfa2
+      FOR ALL ENTRIES IN lt_vbfa_h
+      WHERE vbelv = lt_vbfa_h-vbeln   "Lieferschein
+        AND posnv = lt_vbfa_h-posnn
+        AND vbtyp_n = 'M'.            "Rechnung
+    SORT lt_vbfa2 BY vbelv posnv.
+    DELETE ADJACENT DUPLICATES FROM lt_vbfa2 COMPARING vbelv posnv.
+    lt_vbfa_h2[] = lt_vbfa2[].
+    CLEAR: lt_vbfa2[].
+  ENDIF.
+
+  "--------------------------------------------------------------
+  " mit Serialnummern
+  "--------------------------------------------------------------
+
+  IF NOT lt_lif[] IS INITIAL.
+    "SER01 lesen
+    SELECT lief_nr
+           posnr
+           obknr
+      FROM ser01
+      INTO TABLE lt_ser01
+      FOR ALL ENTRIES IN lt_lif
+      WHERE lief_nr = lt_lif-vbeln
+        AND posnr   = lt_lif-posnr.
+
+    IF lt_ser01[] IS NOT INITIAL.
+      lv_count = lines( lt_ser01 ).
+      GET TIME.
+      PERFORM prot_line USING lv_count   'Serialnummern gelesen                         :'.
+      SORT lt_ser01 BY lief_nr posnr.
+      DELETE ADJACENT DUPLICATES FROM lt_ser01 COMPARING lief_nr posnr.
+      lt_ser01_h[] = lt_ser01[].
+
+
+      "Serialnummern lesen
+      SELECT obknr
+             obzae
+             equnr
+             sernr
+        FROM objk
+        INTO TABLE lt_objk
+        FOR ALL ENTRIES IN lt_ser01
+        WHERE obknr = lt_ser01-obknr.
+
+      IF NOT lt_objk[] IS INITIAL.
+        "Equipmentinfos lesen
+        SELECT equnr
+               serge
+          FROM equi
+          INTO TABLE lt_equi
+          FOR ALL ENTRIES IN lt_objk
+          WHERE equnr = lt_objk-equnr.
+      ENDIF.
+    ENDIF.
+  ENDIF.
+
+  CLEAR lv_count.
+  PERFORM prot_line USING lv_count   'Daten in Gesamttabelle übernehmen             :'.
+
+  "Performance - Gesamttabelle umkopieren in sorted
+  lt_orderview_s[] = gt_orderview[].
+  CLEAR: gt_orderview[].
+  lv_count = lines( lt_orderview_s ).
+  PERFORM prot_line USING lv_count   'Kopiervorgang global -> lokal                 :'.
+
+
+  "Daten in die Gesamttabelle eintragen
+  LOOP AT lt_lif ASSIGNING <ls_lif>.
+
+    CLEAR: ls_orderview,
+           lv_count,                                        "HB240418
+           lv_repdauer,
+           lv_countrep0.
+
+
+    "korrekte Serialnr für ersten 1804-433  HB240418
+    LOOP AT lt_orderview_s ASSIGNING <ls_orderview> WHERE qmnum   = <ls_lif>-qmnum
+                                                      AND fenum   = <ls_lif>-fenum.
+
+      ADD 1 TO lv_count.  "unabhängiger Zähler
+
+      "Repdauer nicht neu bestimmen; den letzen nehmen der da ist.
+      IF <ls_orderview>-repdauer IS INITIAL.
+        ADD 1 TO lv_countrep0.
+      ELSE.
+        lv_repdauer = <ls_orderview>-repdauer.
+      ENDIF.
+
+
+      IF lv_count = 1.
+        "---------------------------------------------------------
+        " Lieferscheinkopf und Posdaten; Gilt für gesamte Meldungsposition
+        "   bei sehr wenigen Fällen mehrere LS pro Meldungspos
+        "   kann aber nicht abgebildet werden
+        "---------------------------------------------------------
+        "Kopfdaten
+        READ TABLE lt_likp ASSIGNING <ls_likp> WITH TABLE KEY vbeln = <ls_lif>-vbeln.
+        IF sy-subrc = 0.
+          <ls_orderview>-deliverdate = <ls_likp>-wadat_ist.  "Lieferdatum
+          <ls_orderview>-likp_erdat  = <ls_likp>-erdat.
+
+          CLEAR: <ls_orderview>-readytoship.
+          IF <ls_likp>-tduhr IS NOT INITIAL.  "Bedingung für ReadyToShip: TDUHR nicht 00:00:00
+            <ls_orderview>-readytoship = <ls_likp>-tddat.     "Transportdispositionsdatum
+          ENDIF.
+        ENDIF.
+
+
+        "Lieferscheindruck
+        READ TABLE gt_nast WITH KEY objky = <ls_lif>-vbeln.
+        IF sy-subrc EQ 0.
+          <ls_orderview>-delnoteprint = gt_nast-datvr.
+        ENDIF.
+
+        "Paketdienst + Trackingnr
+        LOOP AT gt_vttp ASSIGNING <ls_vttp> WHERE vbeln = <ls_lif>-vbeln. "HB260920
+          IF <ls_vttp>-xsitd = co_xsitd_transmed.  "'TRANSMED'.
+            EXIT.
+          ENDIF.
+        ENDLOOP.
+
+        IF sy-subrc = 0.
+          READ TABLE gt_lfa1 WITH KEY lifnr = <ls_vttp>-tdlnr.
+          IF sy-subrc EQ 0.
+            <ls_orderview>-shipper = gt_lfa1-name1.
+          ENDIF.
+          <ls_orderview>-awb = <ls_vttp>-trackn.
+        ENDIF.
+
+        "-----------------------------------------------
+        " Lieferschein-Positionsdaten
+        "-----------------------------------------------
+
+        "Fakturadaten                    HB170115
+        READ TABLE lt_vbfa_h2 ASSIGNING <ls_vbfa> WITH TABLE KEY vbelv = <ls_lif>-vbeln
+                                                                 posnv = <ls_lif>-posnr.
+        IF sy-subrc = 0.
+          <ls_orderview>-rechdatum    = <ls_vbfa>-erdat.
+          <ls_orderview>-fakturapreis = <ls_vbfa>-rfwrt.
+          <ls_orderview>-waers        = <ls_vbfa>-waers.
+          <ls_orderview>-rechnummer   = <ls_vbfa>-vbeln.
+        ENDIF.
+
+        READ TABLE lt_lips ASSIGNING <ls_lips> WITH TABLE KEY vbeln = <ls_lif>-vbeln
+                                                              posnr = <ls_lif>-posnr.
+        IF sy-subrc = 0.
+          <ls_orderview>-lieferwerk    = <ls_lips>-werks.
+          <ls_orderview>-lieferlager   = <ls_lips>-lgort.
+          <ls_orderview>-matnr_out     = <ls_lips>-matnr.
+
+          READ TABLE lt_mara ASSIGNING <ls_mara> WITH TABLE KEY matnr = <ls_lips>-matnr.
+          IF sy-subrc = 0.
+            <ls_orderview>-partnumberout = <ls_mara>-mfrpn.
+          ENDIF.
+        ENDIF.
+
+        UNASSIGN: <ls_ser01>.
+        "gibt es Serialnummern?  einmalig pro Lieferschein-Pos ermitteln
+        READ TABLE lt_ser01_h WITH TABLE KEY lief_nr = <ls_lif>-vbeln
+                                             posnr   = <ls_lif>-posnr
+                                 ASSIGNING <ls_ser01>.
+
+        "Werte Counter 000001 zwischenspeichern als Kopiervorlage
+        ls_orderview = <ls_orderview>.
+
+      ELSE.  "lv_count > 1
+
+
+        "aus COUNTER 1 übertragen
+
+        "Closed übertragen aus erster Pos   HB240418
+        <ls_orderview>-orderstatecompl   = ls_orderview-orderstatecompl.
+        <ls_orderview>-dateclosed        = ls_orderview-dateclosed.
+        <ls_orderview>-archivflag        = ls_orderview-archivflag.
+        <ls_orderview>-akz               = ls_orderview-akz.
+
+        <ls_orderview>-auftragsendesoll  = ls_orderview-auftragsendesoll.
+        <ls_orderview>-initcommitdate    = ls_orderview-initcommitdate.
+
+        <ls_orderview>-rechdatum         = ls_orderview-rechdatum. "HB170115
+        <ls_orderview>-fakturapreis      = ls_orderview-fakturapreis.
+        <ls_orderview>-waers             = ls_orderview-waers.
+        <ls_orderview>-rechnummer        = ls_orderview-rechnummer.
+
+        "weitere Felder belegen HB040222
+        <ls_orderview>-delnotenumber     = ls_orderview-delnotenumber.
+        <ls_orderview>-delnoteposnr      = ls_orderview-delnoteposnr.
+        <ls_orderview>-partnumberout     = ls_orderview-partnumberout.
+        <ls_orderview>-deliverdate       = ls_orderview-deliverdate.
+        <ls_orderview>-delnoteprint      = ls_orderview-delnoteprint.
+        <ls_orderview>-readytoship       = ls_orderview-readytoship.
+        <ls_orderview>-lieferlager       = ls_orderview-lieferlager.
+        <ls_orderview>-lieferwerk        = ls_orderview-lieferwerk.
+        <ls_orderview>-likp_erdat        = ls_orderview-likp_erdat.
+
+        <ls_orderview>-matnr_out         = ls_orderview-matnr_out.
+        <ls_orderview>-shipper           = ls_orderview-shipper.
+        <ls_orderview>-trackdate         = ls_orderview-trackdate. "HB171018
+        <ls_orderview>-tracktime         = ls_orderview-tracktime. "HB171018
+        <ls_orderview>-awb               = ls_orderview-awb.
+
+        <ls_orderview>-tknum             = ls_orderview-tknum.      "HB040222 Transportnummer
+        <ls_orderview>-wbsta             = ls_orderview-wbsta.      "HB040222 Warenbewegungsstatus
+        <ls_orderview>-fkstk             = ls_orderview-fkstk.
+        <ls_orderview>-exti1             = ls_orderview-exti1.
+        <ls_orderview>-qmfe_usr08        = ls_orderview-qmfe_usr08.
+
+
+        "Fakturadaten                    HB170115
+        <ls_orderview>-rechdatum         = ls_orderview-rechdatum.
+        <ls_orderview>-fakturapreis      = ls_orderview-fakturapreis.
+        <ls_orderview>-waers             = ls_orderview-waers.
+        <ls_orderview>-rechnummer        = ls_orderview-rechnummer.
+
+      ENDIF.
+
+      "--------------------------------------------------------
+      " Individueller Werte pro COUNTER  Serialnummern
+      "--------------------------------------------------------
+      IF <ls_ser01> IS ASSIGNED.
+
+        UNASSIGN: <ls_objk>, <ls_equi>.
+        lv_obzae = <ls_orderview>-counter.
+        READ TABLE lt_objk WITH TABLE KEY obknr = <ls_ser01>-obknr
+                                          obzae = lv_obzae
+                                 ASSIGNING <ls_objk>.
+
+        IF <ls_objk> IS ASSIGNED.
+          <ls_orderview>-sernrlif      = <ls_objk>-sernr.
+
+          READ TABLE lt_equi WITH TABLE KEY equnr = <ls_objk>-equnr
+                                   ASSIGNING <ls_equi>.
+          IF <ls_equi> IS ASSIGNED.
+            <ls_orderview>-serialdeliver   = <ls_equi>-serge.
+          ENDIF.
+        ENDIF.
+      ENDIF.
+    ENDLOOP.  "at gt_orderview pro Meldpos für alle COUNTER
+
+    "Falls Reparaturdauer fehlt, jetzt bei allen nachtragen
+    IF NOT lv_countrep0 IS INITIAL.
+      IF NOT lv_repdauer IS INITIAL.
+        LOOP AT lt_orderview_s ASSIGNING <ls_orderview> WHERE qmnum     = <ls_lif>-qmnum
+                                                          AND fenum     = <ls_lif>-fenum
+                                                          AND repdauer <> lv_repdauer.
+
+          <ls_orderview>-repdauer = lv_repdauer.
+        ENDLOOP.  "at gt_orderview pro Meldpos für alle COUNTER
+      ENDIF.
+    ENDIF.
+
+  ENDLOOP. "at lt_lif ASSIGNING <ls_lif>
+
+
+  CLEAR lv_count.
+  PERFORM prot_line USING lv_count   'Ende Vereinzelung                             :'.
+
+  "wieder in Globale Tabelle zurück kopieren
+  gt_orderview[] = lt_orderview_s[].
+  PERFORM prot_line USING lv_count   'Kopiervorgang lokal -> global                 :'.
+
+ENDFORM.                    " VEREINZELUNG
+*&---------------------------------------------------------------------*
+*&      Form  BUILD_Z1_ZX_ADD
+*&---------------------------------------------------------------------*
+*       Globale Hilfstabellen füllen für Verknüpfung Z1 und ZX
+*       Einträge erstellen, falls relevante Werte da
+*       15.08.19: alle ZX dazulesen
+*----------------------------------------------------------------------*
+FORM build_z1_zx_add.
+
+  TYPES: BEGIN OF tys_ord_add,
+           qmnum     TYPE qmnum,
+           fenum     TYPE fenum,
+           counter   TYPE cim_count,
+           remarksrs TYPE /cellag/remarksrs,
+           remarksvm TYPE /cellag/remarksvm,
+         END OF tys_ord_add,
+         tyt_ord_add   TYPE STANDARD TABLE OF tys_ord_add,
+         tyt_ord_add_h TYPE HASHED TABLE OF tys_ord_add WITH UNIQUE KEY qmnum fenum.
+
+
+  DATA:
+    lt_qmfe        TYPE tyt_qmfe_h,
+    lt_ord_add     TYPE tyt_ord_add,
+    lt_ord_add_new TYPE tyt_ord_add,
+    lt_ord_add_h   TYPE tyt_ord_add_h,
+
+    lv_qwrnum      TYPE qwrnum.
+
+  FIELD-SYMBOLS:
+    <ls_zx_add>      TYPE tys_zx_add,
+    <ls_add>         TYPE /cellag/ord_add,
+    <ls_orderview>   LIKE LINE OF gt_orderview,
+    <ls_ord_add>     TYPE tys_ord_add,
+    <ls_ord_add_new> TYPE tys_ord_add,
+    <ls_qwrnum>      TYPE tys_qwrnum.
+
+  "alle Einträge mit QWRNUM lesen   HB150819
+  CHECK NOT gt_qwrnum[] IS INITIAL.
+  SELECT qmnum
+         fenum
+         counter
+         dockdate
+         labelprint
+         deliverdate
+    FROM /cellag/ordview
+    INTO CORRESPONDING FIELDS OF TABLE gt_zx_add
+    FOR ALL ENTRIES IN gt_qwrnum
+    WHERE qmnum = gt_qwrnum-qmnum.
+
+  "QWRNUM ergänzen
+  LOOP AT gt_zx_add ASSIGNING <ls_zx_add>.
+    READ TABLE gt_qwrnum WITH TABLE KEY qmnum = <ls_zx_add>-qmnum ASSIGNING <ls_qwrnum>.
+    IF sy-subrc = 0.
+      <ls_zx_add>-qwrnum = <ls_qwrnum>-qwrnum.
+    ENDIF.
+  ENDLOOP.
+
+
+  "Selektion der Bemerkungen gesammelt       HB300714
+  CHECK NOT gt_zx_add[] IS INITIAL.
+
+  SELECT qmnum
+         fenum
+         counter
+         remarksrs
+         remarksvm
+    FROM /cellag/ord_add
+    INTO TABLE lt_ord_add
+    FOR ALL ENTRIES IN gt_zx_add
+    WHERE qmnum = gt_zx_add-qmnum
+      AND fenum = gt_zx_add-fenum.
+
+  DELETE lt_ord_add WHERE remarksrs = space AND remarksvm = space.
+
+  SORT lt_ord_add BY qmnum ASCENDING
+                     fenum ASCENDING
+                     counter DESCENDING.  "höchster gewinnt
+  DELETE ADJACENT DUPLICATES FROM lt_ord_add COMPARING qmnum fenum.
+
+  lt_ord_add_h[] = lt_ord_add[].
+
+  "aktualisieren durch neuere Einträge aus gt_orderview_add; neue Einträge hinzufügen
+  LOOP AT gt_orderview_add ASSIGNING <ls_add> WHERE remarksrs <> space OR
+                                                    remarksvm <> space.
+    READ TABLE lt_ord_add_h ASSIGNING <ls_ord_add> WITH TABLE KEY qmnum = <ls_add>-qmnum
+                                                                  fenum = <ls_add>-fenum.
+    IF sy-subrc = 0.
+      <ls_ord_add>-remarksrs = <ls_add>-remarksrs.
+      <ls_ord_add>-remarksvm = <ls_add>-remarksvm.
+    ELSE.
+      INSERT INITIAL LINE INTO TABLE lt_ord_add_new ASSIGNING <ls_ord_add_new>.
+      <ls_ord_add_new>-qmnum     = <ls_add>-qmnum.
+      <ls_ord_add_new>-fenum     = <ls_add>-fenum.
+      <ls_ord_add_new>-counter   = <ls_add>-counter.
+      <ls_ord_add_new>-remarksrs = <ls_add>-remarksrs.
+      <ls_ord_add_new>-remarksvm = <ls_add>-remarksvm.
+    ENDIF.
+  ENDLOOP.
+
+  IF NOT lt_ord_add_new[] IS INITIAL.
+    lt_ord_add[] = lt_ord_add_h[].
+    APPEND LINES OF lt_ord_add_new TO lt_ord_add.
+    SORT lt_ord_add BY qmnum ASCENDING
+                       fenum ASCENDING
+                       counter DESCENDING.  "höchster gewinnt
+    DELETE ADJACENT DUPLICATES FROM lt_ord_add COMPARING qmnum fenum.
+
+    lt_ord_add_h[] = lt_ord_add[].
+  ENDIF.
+
+  "abmischen
+  LOOP AT gt_zx_add ASSIGNING <ls_zx_add>.
+    READ TABLE lt_ord_add_h ASSIGNING <ls_ord_add> WITH TABLE KEY qmnum = <ls_zx_add>-qmnum
+                                                                  fenum = <ls_zx_add>-fenum.
+    IF sy-subrc = 0.
+      <ls_zx_add>-remarksrs = <ls_ord_add>-remarksrs.
+      <ls_zx_add>-remarksvm = <ls_ord_add>-remarksvm.
+    ENDIF.
+  ENDLOOP.
+
+  CLEAR: gt_qwrnum[].
+
+ENDFORM.                    " BUILD_Z1_ZX_ADD
+*&---------------------------------------------------------------------*
+*&      Form  ADD_ZX_Z1_LINK
+*&---------------------------------------------------------------------*
+*       Falls ZX-Meldungen relevante Daten haben, die ZX-Daten in die
+*       Z1-Daten übertragen
+*----------------------------------------------------------------------*
+FORM add_zx_z1_link .
+
+  DATA: lv_qmnum TYPE qmnum,
+        lv_count TYPE i.
+
+  FIELD-SYMBOLS:
+    <ls_zx_add>    TYPE tys_zx_add,
+    <ls_orderview> LIKE LINE OF gt_orderview.
+
+  lv_count = lines( gt_zx_add ).
+  PERFORM prot_line USING lv_count 'ZX-Zusatzinfos für Verknüpfung                :'.
+
+
+  LOOP AT gt_zx_add ASSIGNING <ls_zx_add>.
+    CLEAR: lv_qmnum.
+    IF NOT <ls_zx_add>-qwrnum IS INITIAL.
+      lv_qmnum = <ls_zx_add>-qwrnum.
+    ENDIF.
+
+    IF NOT lv_qmnum IS INITIAL.
+      "es gibt jeweils lediglich eine Position; sonst loop verwenden
+      READ TABLE gt_orderview WITH KEY qmnum = lv_qmnum  ASSIGNING <ls_orderview> BINARY SEARCH.
+      IF sy-subrc = 0.
+        "Werte in Z1-Meldung eintragen
+        <ls_orderview>-zx_dockdate    = <ls_zx_add>-dockdate.
+        <ls_orderview>-zx_labelprint  = <ls_zx_add>-labelprint.
+        <ls_orderview>-zx_deliverdate = <ls_zx_add>-deliverdate.
+        <ls_orderview>-zx_remarksrs   = <ls_zx_add>-remarksrs. "HB300714
+        <ls_orderview>-zx_remarksvm   = <ls_zx_add>-remarksvm. "HB300714
+        ADD 1 TO lv_count.
+      ENDIF.
+    ENDIF.
+  ENDLOOP.
+
+  PERFORM prot_line USING lv_count 'Verknüpfung Z1 mit ZX-Meldung                 :'.
+
+ENDFORM.                    "add_zx_z1_link
+*&---------------------------------------------------------------------*
+*&      Form  GET_TRACKDATA_VENDOR
+*&---------------------------------------------------------------------*
+*       Basis ist die Tabelle gt_orderview
+*----------------------------------------------------------------------*
+FORM get_trackdata_vendor .
+
+  TYPES: BEGIN OF tys_vtrkh,   "Lieferscheinpos/kopf/vbup
+           vbeln      TYPE vtrkh-vbeln,
+           uevbeln    TYPE vtrkh-uevbeln,
+           trackn     TYPE vtrkh-trackn,
+           tracktstmp TYPE vtrkh-tracktstmp,
+           trkstat    TYPE vtrkh-trkstat,
+         END   OF tys_vtrkh,
+
+         tyt_vtrkh  TYPE SORTED TABLE OF tys_vtrkh
+                   WITH NON-UNIQUE KEY uevbeln,
+         tyt_vtrkh2 TYPE SORTED TABLE OF tys_vtrkh
+                  WITH NON-UNIQUE KEY vbeln,
+
+
+         BEGIN OF tys_vepo,  "Handlingsunit
+           vbeln TYPE vepo-vbeln,
+           posnr TYPE vepo-posnr,
+           venum TYPE vepo-venum,
+         END   OF tys_vepo,
+
+         tyt_vepo TYPE SORTED TABLE OF tys_vepo
+                  WITH NON-UNIQUE KEY vbeln posnr.
+
+  DATA: lt_orderview TYPE tyt_orderview,
+        lt_vtrkh     TYPE tyt_vtrkh,
+        lt_vtrkh2    TYPE tyt_vtrkh2,
+        lt_vepo      TYPE tyt_vepo,
+        lv_date      TYPE sy-datum,
+        lv_time      TYPE sy-uzeit,
+        lv_count     TYPE i.
+
+  FIELD-SYMBOLS:
+    <ls_vtrkh>     TYPE tys_vtrkh,
+    <ls_vepo>      TYPE tys_vepo,
+    <ls_orderview> TYPE tys_orderview.
+
+
+  "umkopieren in lokale Tabelle und nur die mit Vendorlieferung belassen
+  lt_orderview[] = gt_orderview[].
+  DELETE lt_orderview WHERE yliefvend = space.
+
+  syst-tfill = lines( lt_orderview ).
+  PERFORM prot_line USING syst-tfill 'yliefvend = space  Anzahl                     :'.
+
+*----------------------------------------------------------------
+*    Trackingnummern mit Lieferschein/Handlings-Unit
+*----------------------------------------------------------------
+  IF NOT lt_orderview[] IS INITIAL.
+    SELECT vbeln
+           uevbeln
+           trackn
+           tracktstmp        "Tracking Zeitpunkt in UTC-Format
+           trkstat           "Status: A = abgeholt, C = geliefert
+      FROM vtrkh
+      INTO TABLE lt_vtrkh
+      FOR ALL ENTRIES IN lt_orderview
+      WHERE uevbtyp = 'J'
+        AND uevbeln = lt_orderview-yliefvend.  "Verwendung Index 003
+
+    syst-tfill = lines( lt_vtrkh ).
+    PERFORM prot_line USING syst-tfill 'lt_vtrkh           Anzahl                     :'.
+
+    "Trackingdaten ergänzen in Ursprungstabelle
+    LOOP AT gt_orderview ASSIGNING <ls_orderview> WHERE yliefvend > space.
+      READ TABLE lt_vtrkh WITH TABLE KEY uevbeln = <ls_orderview>-yliefvend
+                          ASSIGNING <ls_vtrkh>.
+      IF sy-subrc = 0.
+        <ls_orderview>-tracknvend = <ls_vtrkh>-trackn.
+        CONVERT TIME STAMP <ls_vtrkh>-tracktstmp TIME ZONE 'CET   '
+            INTO DATE lv_date TIME lv_time.
+        IF NOT lv_date IS INITIAL.
+          IF <ls_vtrkh>-trkstat = 'C'.
+            <ls_orderview>-trackdatevend = lv_date.
+          ENDIF.
+        ENDIF.
+      ENDIF.
+    ENDLOOP.
+  ENDIF.
+
+*----------------------------------------------------------------
+*    Trackingnummern mit Transporten
+*----------------------------------------------------------------
+  "umkopieren in lokale Tabelle und nur die mit Vendorlieferung belassen
+  lt_orderview[] = gt_orderview[].
+  DELETE lt_orderview WHERE yliefvend  = space AND
+                            tracknvend = space.
+
+  syst-tfill = lines( lt_orderview ).
+  PERFORM prot_line USING syst-tfill 'tracknvend = space  Anzahl                    :'.
+
+  IF NOT lt_orderview[] IS INITIAL.
+    "Selektion der restlichen HandlingsUnits
+    SELECT vbeln
+           posnr
+           venum                  "HU-Nr
+      FROM vepo                   "Verpacken: Handling Unit Position (Inhalt)
+      INTO TABLE lt_vepo
+      FOR ALL ENTRIES IN lt_orderview
+      WHERE vbeln = lt_orderview-yliefvend
+        AND posnr = lt_orderview-yliefvendpos.
+
+    IF NOT lt_vepo[] IS INITIAL.
+      SELECT vbeln
+             uevbeln
+             trackn
+             tracktstmp        "Tracking Zeitpunkt in UTC-Format
+             trkstat           "Status: A = abgeholt, C = geliefert
+        FROM vtrkh
+        INTO TABLE lt_vtrkh2
+        FOR ALL ENTRIES IN lt_vepo
+        WHERE vbtyp = 'X'               "Handling Unit
+          AND vbeln = lt_vepo-venum.
+
+      syst-tfill = lines( lt_vtrkh2 ).
+      PERFORM prot_line USING syst-tfill 'lt_vtrkh2          Anzahl                     :'.
+
+      "Trackingdaten ergänzen in Ursprungstabelle
+      LOOP AT gt_orderview ASSIGNING <ls_orderview> WHERE yliefvend IS NOT INITIAL AND
+                                                          tracknvend IS INITIAL.
+        READ TABLE lt_vepo WITH TABLE KEY vbeln = <ls_orderview>-yliefvend
+                                          posnr = <ls_orderview>-yliefvendpos
+                                ASSIGNING <ls_vepo>.
+        IF sy-subrc = 0.
+          READ TABLE lt_vtrkh2 WITH TABLE KEY vbeln = <ls_vepo>-venum
+                                    ASSIGNING <ls_vtrkh>.
+          IF sy-subrc = 0.
+            <ls_orderview>-tracknvend = <ls_vtrkh>-trackn.
+            CONVERT TIME STAMP <ls_vtrkh>-tracktstmp TIME ZONE 'CET   '
+                INTO DATE lv_date TIME lv_time.
+            IF NOT lv_date IS INITIAL.
+              IF <ls_vtrkh>-trkstat = 'C'.
+                <ls_orderview>-trackdatevend = lv_date.
+              ENDIF.
+            ENDIF.
+          ENDIF.
+        ENDIF.
+      ENDLOOP.
+    ENDIF.
+  ENDIF.
+
+*----------------------------------------------------------------
+*    Trackingnummern aus vttp; analog YLE01 1808-372
+*----------------------------------------------------------------
+  "umkopieren in lokale Tabelle und nur die mit Vendorlieferung belassen
+  lt_orderview[] = gt_orderview[].
+  DELETE lt_orderview WHERE yliefvend  = space AND
+                            tracknvend = space.
+
+  syst-tfill = lines( lt_orderview ).
+  PERFORM prot_line USING syst-tfill 'yliefvend/tracknvend = space  Anzahl          :'.
+
+  IF NOT lt_orderview[] IS INITIAL.
+    SELECT a~vbeln
+           c~uevbeln
+           c~trackn
+           c~tracktstmp        "Tracking Zeitpunkt in UTC-Format
+           c~trkstat           "Status: A = abgeholt, C = geliefert
+     FROM ( ( vttp AS a                 "Transportposition
+       INNER JOIN vttk AS b         "Transportkopf
+         ON a~tknum = b~tknum )
+       LEFT OUTER JOIN vtrkh AS c   "Trackingdaten Kopf
+         ON  c~uevbtyp = 'J'    "Zum Index zählt UEVBTYP Teil1: J = Lieferung
+         AND c~uevbeln = a~tknum )
+     INTO TABLE lt_vtrkh2
+     FOR ALL ENTRIES IN lt_orderview
+     WHERE a~vbeln = lt_orderview-yliefvend.
+
+    SELECT a~vbeln
+           c~uevbeln
+           c~trackn
+           c~tracktstmp        "Tracking Zeitpunkt in UTC-Format
+           c~trkstat           "Status: A = abgeholt, C = geliefert
+     FROM ( ( vttp AS a                 "Transportposition
+       INNER JOIN vttk AS b         "Transportkopf
+         ON a~tknum = b~tknum )
+       LEFT OUTER JOIN vtrkh AS c   "Trackingdaten Kopf
+         ON  c~uevbtyp = '8'    "Zum Index zählt UEVBTYP Teil 2 8 = Transport
+         AND c~uevbeln = a~tknum )
+     APPENDING TABLE lt_vtrkh2
+     FOR ALL ENTRIES IN lt_orderview
+     WHERE a~vbeln = lt_orderview-yliefvend.
+
+    syst-tfill = lines( lt_vtrkh2 ).
+    PERFORM prot_line USING syst-tfill 'lt_vtrkh2   Anzahl                            :'.
+
+    "Trackingdaten ergänzen in Ursprungstabelle
+    LOOP AT gt_orderview ASSIGNING <ls_orderview> WHERE yliefvend > space.
+      LOOP AT lt_vtrkh2 ASSIGNING <ls_vtrkh>
+                          WHERE vbeln  = <ls_orderview>-yliefvend
+                            AND trackn > space.
+        <ls_orderview>-tracknvend = <ls_vtrkh>-trackn.
+        CONVERT TIME STAMP <ls_vtrkh>-tracktstmp TIME ZONE 'CET   '
+            INTO DATE lv_date TIME lv_time.
+        IF NOT lv_date IS INITIAL.
+          IF <ls_vtrkh>-trkstat = 'C'.
+            <ls_orderview>-trackdatevend = lv_date.
+          ENDIF.
+        ENDIF.
+      ENDLOOP.
+    ENDLOOP.
+  ENDIF.
+
+ENDFORM.                    " GET_TRACKDATA_VENDOR
+*&---------------------------------------------------------------------*
+*&      Form  GET_WITHOUT_VBELN
+*&---------------------------------------------------------------------*
+*       Für Workaround: alle ohne Vertriebsbeleg lesen
+*       Dazu aus vbap Meldungsnummer bestimmen
+*       Meldungspositionen sind bereits gelesen in gt_qmfe
+*----------------------------------------------------------------------*
+FORM get_without_vbeln .
+
+  TYPES:
+    tyt_ordview TYPE STANDARD TABLE OF ztordview_ord_mi,
+
+    BEGIN OF tys_otgrp,
+      qmnum TYPE qmnum,
+      count TYPE i,       "erkennen mehrfache otgrps
+    END OF tys_otgrp,
+    tyt_otgrp TYPE HASHED TABLE OF tys_otgrp WITH UNIQUE KEY qmnum.
+
+
+  DATA:
+    lt_ordview    TYPE tyt_ordview,
+    lt_qmfe       TYPE tyt_qmfe,
+    lt_vbeln_miss TYPE tyt_vbeln_miss,
+    ls_otgrp      TYPE tys_otgrp,
+    lt_otgrp      TYPE tyt_otgrp.
+
+  FIELD-SYMBOLS:
+    <ls_qmfe>    TYPE tys_qmfe,
+    <ls_qmfe2>   TYPE tys_qmfe,
+    <ls_otgrp>   TYPE tys_otgrp,
+    <ls_ordview> TYPE ztordview_ord_mi.
+
+  "1. Alle vorhandenen aus Orderview; Bei Start Funktion oder Restmenge
+  SELECT qmnum
+         fenum
+         archivflag
+    FROM /cellag/ordview
+    INTO CORRESPONDING FIELDS OF TABLE lt_ordview
+    WHERE vbeln      =  space.
+
+  SORT lt_ordview BY qmnum fenum.
+  DELETE ADJACENT DUPLICATES FROM lt_ordview COMPARING qmnum fenum.
+
+  MODIFY ztordview_ord_mi FROM TABLE lt_ordview.
+  COMMIT WORK AND WAIT.
+
+  "2. Die heute oder gestern gelesenen direkt abgleichen
+
+  "Hilfstabelle in lt_qmfe; 2 Aufträge bekommen die mit Unterschiedl OTGRP pro Meldung
+  CLEAR: lt_ordview[].
+  LOOP AT gt_qmfe ASSIGNING <ls_qmfe>.
+    INSERT INITIAL LINE INTO TABLE lt_qmfe  ASSIGNING <ls_qmfe2>.
+    <ls_qmfe2>-qmnum = <ls_qmfe>-qmnum.
+    <ls_qmfe2>-fenum = <ls_qmfe>-fenum.
+    <ls_qmfe2>-otgrp = <ls_qmfe>-otgrp.  "Kandidaten an abweichender erkennen
+  ENDLOOP.
+
+  IF NOT lt_qmfe[] IS INITIAL.
+    SORT lt_qmfe BY qmnum otgrp.
+    DELETE ADJACENT DUPLICATES FROM lt_qmfe COMPARING qmnum otgrp.
+    LOOP AT lt_qmfe ASSIGNING <ls_qmfe>.
+      ls_otgrp-qmnum = <ls_qmfe>-qmnum.
+      ls_otgrp-count = 1.
+      COLLECT ls_otgrp INTO lt_otgrp.
+    ENDLOOP.
+
+    "Die mit mehr als ein Eintrag sind die richtigen
+    SORT lt_qmfe BY qmnum fenum.  "Reihenfolge nach FENUM!
+    LOOP AT lt_otgrp ASSIGNING <ls_otgrp> WHERE count > 1.
+      LOOP AT lt_qmfe ASSIGNING <ls_qmfe> WHERE qmnum = <ls_otgrp>-qmnum.
+        "der erste ist der richtige; der wäre später ohne Auftragsnummer
+        INSERT INITIAL LINE INTO TABLE lt_ordview ASSIGNING <ls_ordview>.
+        <ls_ordview>-qmnum = <ls_qmfe>-qmnum.
+        <ls_ordview>-fenum = <ls_qmfe>-fenum.
+        EXIT.
+      ENDLOOP.
+    ENDLOOP.
+
+    IF NOT lt_ordview[] IS INITIAL.
+      "die neuen auch hinzufügen
+      MODIFY ztordview_ord_mi FROM TABLE lt_ordview.
+      COMMIT WORK AND WAIT.
+    ENDIF.
+  ENDIF.
+
+  "3. Gesamtumfang zur Verarbeitung
+  SELECT *
+    FROM ztordview_ord_mi
+    INTO TABLE lt_ordview
+    WHERE archivflag = space.
+
+  CHECK NOT lt_ordview[] IS INITIAL.
+
+  SELECT /cellag/qmnum AS qmnum
+         /cellag/fenum AS fenum
+         vbeln
+    FROM vbap
+    INTO TABLE gt_vbeln_miss
+    FOR ALL ENTRIES IN lt_ordview
+    WHERE /cellag/qmnum = lt_ordview-qmnum
+      AND /cellag/fenum = lt_ordview-fenum.
+
+
+ENDFORM.                    " GET_WITHOUT_VBELN
+*&---------------------------------------------------------------------*
+*&      Form  CHECK_FAKTSTATUS_DELIVERY
+*&---------------------------------------------------------------------*
+*       Lieferbezogene Fakturen nicht erkannt. 1510-320
+*       Kandidaten: Status C aber noch kein Fakturastatus
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM check_faktstatus_delivery .
+
+  TYPES:
+    BEGIN OF tys_vbup,
+      vbeln TYPE vbeln,
+      posnr TYPE posnr,
+    END OF tys_vbup,
+    tyt_vbup1 TYPE STANDARD TABLE OF tys_vbup,
+    tyt_vbup2 TYPE HASHED TABLE OF tys_vbup WITH UNIQUE KEY vbeln posnr.
+
+  DATA:
+    lt_vbup1 TYPE tyt_vbup1,
+    lt_vbup2 TYPE tyt_vbup2,
+    lv_count TYPE i.
+
+
+  FIELD-SYMBOLS:
+    <ls_orderview> LIKE LINE OF gt_orderview,
+    <ls_vbup>      TYPE tys_vbup.
+
+  LOOP AT gt_orderview ASSIGNING <ls_orderview> WHERE orderstatecompl = 'C' AND
+                                                      delnotenumber IS NOT INITIAL AND
+                                                      fkstk = space.
+    INSERT INITIAL LINE INTO TABLE lt_vbup1 ASSIGNING <ls_vbup>.
+    <ls_vbup>-vbeln = <ls_orderview>-delnotenumber.
+    <ls_vbup>-posnr = <ls_orderview>-delnoteposnr.
+  ENDLOOP.
+
+  IF NOT lt_vbup1[] IS INITIAL.
+
+* Quick Fix Replace VBUP table access with the access of compatibility view V_VBUP_S4
+* Transport SA2K902251 MKU20260331 RM S4HANA Custom Code 2.1 ADOPT 2508-614
+* Replaced Code:
+*    SELECT vbeln
+*           posnr
+*      FROM vbup
+*      INTO TABLE lt_vbup2
+*      FOR ALL ENTRIES IN lt_vbup1
+*      WHERE vbeln = lt_vbup1-vbeln
+*        AND posnr = lt_vbup1-posnr
+*        AND fksta = 'C'.
+
+SELECT FROM V_VBUP_S4 FIELDS VBELN , POSNR FOR ALL ENTRIES IN @LT_VBUP1 WHERE VBELN = @LT_VBUP1-VBELN AND POSNR = @LT_VBUP1-POSNR AND FKSTA = 'C' INTO TABLE @LT_VBUP2 .
+* End of Quick Fix
+
+
+    IF NOT lt_vbup2[] IS INITIAL.
+      LOOP AT gt_orderview ASSIGNING <ls_orderview> WHERE orderstatecompl = 'C' AND
+                                                          delnotenumber IS NOT INITIAL AND
+                                                          fkstk = space.
+        READ TABLE lt_vbup2 ASSIGNING <ls_vbup> WITH TABLE KEY vbeln = <ls_orderview>-delnotenumber
+                                                               posnr = <ls_orderview>-delnoteposnr. "HB260119
+        IF sy-subrc = 0.
+          ADD 1 TO lv_count.
+          <ls_orderview>-fkstk = 'C'.
+          IF <ls_orderview>-trackdate      > '20010101' OR           "Ablieferdatum nicht leer
+            ( <ls_orderview>-deliverdate    < gv_10days_back AND
+              <ls_orderview>-deliverdate    > '20010101' ) .
+            <ls_orderview>-archivflag = c_true.
+          ENDIF.
+        ENDIF.
+      ENDLOOP.
+
+      PERFORM prot_line USING lv_count 'Fakturastatus C Lieferbezogen                 :'.
+
+    ENDIF.
+  ENDIF.
+
+ENDFORM.                    " CHECK_FAKTSTATUS_DELIVERY
+*&---------------------------------------------------------------------*
+*&      Form  GET_TA_QDAT
+*&---------------------------------------------------------------------*
+*       1511-375 Erweiterung Orderview Einlagerung
+*       1.TANUM	        Transportauftragsnummer
+*       2.EINLAGERDATE  Einlagerungsdatum
+*       3.EINLAGZT      Uhrzeit Einlagerung
+*       4.DATUM_Q_FREI  Datum Umlagerung Q nach Frei
+*       5.UZEIT_Q_FREI  Uhrzeit Einlagerung Q nach Frei
+*
+*       Bestimmung der Felder über TA.
+*       Materialbeleg über gt_mkpf bestimmen (Bezug zur FANUMER)
+*       LTAP bestimmen über /CTDI/MBLNR_Q: 1/2/3
+*       aus LTAP /CTDI/MBLNR_FREI: 4/5
+*----------------------------------------------------------------------*
+FORM get_ta_qdat .
+
+  TYPES:
+
+    BEGIN OF tys_mkpf2,
+      mblnr LIKE mkpf-mblnr,
+      mjahr LIKE mkpf-mjahr,
+      cpudt LIKE mkpf-cpudt,
+      cputm LIKE mkpf-cputm,
+    END OF tys_mkpf2,
+    tyt_mkpf2 TYPE HASHED TABLE OF tys_mkpf2 WITH UNIQUE KEY mblnr mjahr,
+
+    BEGIN OF tys_ltap,
+      tanum            TYPE tanum,
+      qdatu            TYPE ltap_qdatu,
+      qzeit            TYPE ltap_qzeit,
+      /ctdi/mblnr_q    TYPE /ctdi/mblnr_q,
+      /ctdi/mblnr_frei TYPE /ctdi/mblnr_frei,
+      /ctdi/mjahr_frei TYPE /ctdi/mjahr_frei,
+    END OF tys_ltap,
+    tyt_ltap   TYPE STANDARD TABLE OF tys_ltap,
+    tyt_ltap_h TYPE HASHED TABLE OF tys_ltap WITH UNIQUE KEY /ctdi/mblnr_q.
+
+  DATA:
+    lt_mkpf    TYPE tyt_mkpf,
+    lt_mkpf_s  TYPE tyt_mkpf_s,
+    lt_mkpf2   TYPE tyt_mkpf2,
+    lt_ltap    TYPE tyt_ltap,
+    lt_ltap_h  TYPE tyt_ltap_h,
+
+    lv_count_t TYPE i,
+    lv_count_m TYPE i.
+
+
+
+  FIELD-SYMBOLS:
+    <ls_orderview> LIKE LINE OF gt_orderview,
+    <ls_mkpf>      TYPE tys_mkpf,
+    <ls_ltap>      TYPE tys_ltap,
+    <ls_mkpf2>     TYPE tys_mkpf2.
+
+  lt_mkpf[] = gt_mkpf[].
+  SORT lt_mkpf BY xblnr mblnr.
+  DELETE ADJACENT DUPLICATES FROM lt_mkpf COMPARING xblnr mblnr.
+  lt_mkpf_s[] = lt_mkpf[].
+  CLEAR:  lt_mkpf[].
+
+  IF NOT lt_mkpf_s[] IS INITIAL.
+    "Transportaufträge bestimmen
+    SELECT tanum
+           qdatu
+           qzeit
+           /ctdi/mblnr_q
+           /ctdi/mblnr_frei
+           /ctdi/mjahr_frei
+      FROM ltap
+      INTO TABLE lt_ltap
+      FOR ALL ENTRIES IN lt_mkpf_s
+      WHERE /ctdi/mblnr_q =  lt_mkpf_s-mblnr
+        AND /ctdi/mjahr_q =  lt_mkpf_s-mjahr.
+*      AND qdatu         >= co_einlagerdate.   "nur die ab 1.12.2015   auch nicht quittierte
+    SORT lt_ltap BY /ctdi/mblnr_q.
+    DELETE ADJACENT DUPLICATES FROM lt_ltap COMPARING /ctdi/mblnr_q.
+    lt_ltap_h[] = lt_ltap[].
+    CLEAR: lt_ltap[].
+
+    "Materialbelege Buchung frei bestimmen
+    IF NOT lt_ltap_h[] IS INITIAL.
+      SELECT mblnr
+             mjahr
+             cpudt
+             cputm
+        FROM mkpf
+        INTO TABLE lt_mkpf2
+        FOR ALL ENTRIES IN lt_ltap_h
+        WHERE mblnr = lt_ltap_h-/ctdi/mblnr_frei
+          AND mjahr = lt_ltap_h-/ctdi/mjahr_frei.
+
+    ENDIF.
+  ENDIF.
+
+  "Daten abmischen
+  LOOP AT gt_orderview ASSIGNING <ls_orderview>.
+
+    "MELDPOS  HB230116
+    CONCATENATE <ls_orderview>-qmnum <ls_orderview>-fenum INTO <ls_orderview>-meldpos.
+
+    LOOP AT lt_mkpf_s ASSIGNING <ls_mkpf> WHERE xblnr = <ls_orderview>-fanumber.
+      READ TABLE lt_ltap_h ASSIGNING <ls_ltap> WITH TABLE KEY /ctdi/mblnr_q = <ls_mkpf>-mblnr.
+      IF sy-subrc = 0.
+        <ls_orderview>-tanum        = <ls_ltap>-tanum.
+        IF <ls_orderview>-einlagerdate IS INITIAL AND NOT <ls_ltap>-qdatu IS INITIAL.
+          <ls_orderview>-einlagerdate = <ls_ltap>-qdatu.
+          <ls_orderview>-einlagzt     = <ls_ltap>-qzeit.
+
+          "Form Build_calculated_Fields wird nicht durchlaufen; deshalb hier Closed setzen
+          IF NOT <ls_orderview>-einlagerdate IS INITIAL.
+            IF   NOT <ls_orderview>-deliverdate IS INITIAL.
+              IF gt_orderview-orderstatecompl <> c_deleted.
+                <ls_orderview>-orderstatecompl = c_closed.
+              ENDIF.
+              <ls_orderview>-dateclosed      = <ls_orderview>-einlagerdate.
+            ENDIF.
+          ENDIF.
+
+          ADD 1 TO lv_count_t.
+        ELSEIF <ls_orderview>-einlagerdate IS NOT INITIAL.
+          CLEAR: <ls_orderview>-tanum.
+        ENDIF.
+
+        IF NOT <ls_ltap>-/ctdi/mblnr_frei IS INITIAL.
+          IF NOT  <ls_orderview>-tanum IS INITIAL.
+            READ TABLE lt_mkpf2 ASSIGNING <ls_mkpf2> WITH TABLE KEY mblnr = <ls_ltap>-/ctdi/mblnr_frei
+                                                                    mjahr = <ls_ltap>-/ctdi/mjahr_frei.
+            IF sy-subrc = 0.
+              <ls_orderview>-datum_q_frei = <ls_mkpf2>-cpudt.
+              <ls_orderview>-uzeit_q_frei = <ls_mkpf2>-cputm.
+              ADD 1 TO lv_count_m.
+            ENDIF.
+          ENDIF.
+        ENDIF.
+      ENDIF.
+    ENDLOOP.  "AT lt_mkpf_s
+  ENDLOOP.    "AT gt_orderview
+
+  PERFORM prot_line USING lv_count_t 'Ermittelt TA Einlagerung                      :'.
+  PERFORM prot_line USING lv_count_m 'Ermittelt MatBeleg Kubestand an frei          :'.
+
+ENDFORM.                    " GET_TA_QDAT
+*&---------------------------------------------------------------------*
+*&      Form  GET_MARC_DATA
+*&---------------------------------------------------------------------*
+*       Lesen Serialnrprofil
+*       falls weniger als 1000 in MARA selektiert. dann for all entries
+*       sonst alle gefüllten lesen
+*----------------------------------------------------------------------*
+FORM get_marc_data .
+
+  DATA:
+    lv_count     TYPE i.
+
+  lv_count = lines( gt_mara ).
+
+  IF lv_count <= 1000.
+    SELECT matnr
+           werks
+           sernp
+           prctr                                            "HB081018
+      FROM marc
+      INTO TABLE gt_marc
+      FOR ALL ENTRIES IN gt_mara
+      WHERE matnr = gt_mara-matnr.
+
+  ELSE.
+    "alle mit SERNP gefüllt; besser falls Gesamtlauf
+    "PA1 Juli 2016: befüllt 633.156, alle: 1.700.000
+    SELECT matnr
+           werks
+           sernp
+           prctr                                            "HB081018
+      FROM marc
+      INTO TABLE gt_marc.
+  ENDIF.
+
+  syst-tfill = lines( gt_marc ).
+  PERFORM prot_line USING syst-tfill 'BUILD marc_data                               :'.
+
+ENDFORM.                    " GET_MARC_DATA
+*&---------------------------------------------------------------------*
+*&      Form  BUILD_MARC_LIST
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM build_marc_list .
+
+  FIELD-SYMBOLS:
+    <ls_marc>  TYPE tys_marc,
+    <ls_prctr> TYPE zordview_prctr.                         "HB081018
+
+  READ TABLE gt_marc ASSIGNING <ls_marc> WITH TABLE KEY matnr = gt_qmfe-bautl
+                                                        werks = gwa_orderview-werks.
+  IF sy-subrc = 0.
+    gwa_orderview-sernp = <ls_marc>-sernp.
+
+    "prctr bestimmen bzw. überstéuern, falls MARC führend  HB081018
+    "Customizing prüfen
+    READ TABLE gt_zordview_prctr ASSIGNING <ls_prctr> WITH TABLE KEY otgrp = gwa_orderview-otgrp.
+    IF sy-subrc = 0.
+      "Falls Eintrag enthalten, ergibt sich PRCTR aus dem Wert von MARC-PRCTR
+      gwa_orderview-prctr = <ls_marc>-prctr.                "HB081018
+    ENDIF.
+
+  ENDIF.
+
+ENDFORM.                    " BUILD_MARC_LIST
+*&---------------------------------------------------------------------*
+*&      Form  WRITE_PROTOKOLL
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM write_protokoll .
+
+  FIELD-SYMBOLS:
+    <lv_string> TYPE string.
+
+  ycl_base=>selektionen_ausgeben( ).
+
+  LOOP AT gt_string ASSIGNING <lv_string>.
+    WRITE:/ <lv_string>.
+  ENDLOOP.
+
+
+ENDFORM.                    " WRITE_PROTOKOLL
+*&---------------------------------------------------------------------*
+*&      Form  COUNT_ROWS
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM count_rows .
+
+  SELECT COUNT( * ) FROM /cellag/ordview                "#EC CI_NOWHERE
+    INTO syst-tfill.
+  PERFORM prot_line USING syst-tfill '/CELLAG/ORDVIEW     Anzahl Datensätze         :'.
+
+  IF p_ctarch = abap_true.   "Bringt Zeitersparnis, falls nicht ermittelt
+    SELECT COUNT( * ) FROM /cellag/ordview
+      INTO syst-tfill
+      WHERE archivflag = abap_false.
+    PERFORM prot_line USING syst-tfill '/CELLAG/ORDVIEW     Archivflag nicht gesetzt  :'.
+  ENDIF.
+
+  SELECT COUNT( * ) FROM /cellag/ord_add                "#EC CI_NOWHERE
+    INTO syst-tfill.
+  PERFORM prot_line USING syst-tfill '/CELLAG/ORD_ADD     Anzahl Datensätze         :'.
+
+  SELECT COUNT( * ) FROM zordview_clos_ex               "#EC CI_NOWHERE
+    INTO syst-tfill.
+  PERFORM prot_line USING syst-tfill 'ZORDVIEW_CLOS_EX    Anzahl Datensätze         :'.
+
+  PERFORM prot_line USING syst-tfill ''.  "Leerzeile
+
+ENDFORM.                    " COUNT_ROWS
+*&---------------------------------------------------------------------*
+*&      Form  PROT_LINE
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*      -->P_SYST_TFILL  text
+*      -->P_0300   text
+*----------------------------------------------------------------------*
+FORM prot_line  USING    p_count TYPE i
+                         p_text60 TYPE text60.
+
+  DATA: lv_string  TYPE string,
+        lv_uzeit_t TYPE text10,
+        lv_count_t TYPE text10.
+
+  IF p_text60 IS INITIAL.
+    "Leerzeile
+    lv_string = '------------------------------------------------------------------'.
+    APPEND lv_string TO gt_string.
+  ELSE.
+    GET TIME.
+    WRITE sy-uzeit TO lv_uzeit_t.
+    IF NOT p_count IS INITIAL.
+      WRITE p_count TO lv_count_t.
+    ENDIF.
+    CONCATENATE lv_uzeit_t p_text60 lv_count_t INTO lv_string SEPARATED BY space.
+    APPEND lv_string TO gt_string.
+  ENDIF.
+ENDFORM.                    " PROT_LINE
+*&---------------------------------------------------------------------*
+*&      Form  GET_MATKOST_AUFM
+*&---------------------------------------------------------------------*
+*       Materialkosten aus AUFM ermitteln BWart 261/262
+*       Falls weniger als 100 Meldung AUFM gezielt lesen, sonst komplett
+*       Workshop_rate ermitteln aus PMCO, VORGA = RKL
+*----------------------------------------------------------------------*
+*----------------------------------------------------------------------*
+FORM get_matkost_aufm .
+
+  TYPES:
+    BEGIN OF tys_aufm,
+      mblnr TYPE mblnr,   "sehr seltsam - nur hinzugefügt weil zu wenig Daten selektiert...
+      aufnr TYPE aufnr,
+      dmbtr TYPE dmbtr,
+      waers TYPE waers,
+      shkzg TYPE shkzg,  "Soll-/Haben-Kennzeichen H/S
+    END OF tys_aufm,
+    tyt_aufm TYPE SORTED TABLE OF tys_aufm WITH NON-UNIQUE KEY aufnr,
+
+    BEGIN OF tys_pmco,
+      objnr TYPE bp_objekt,
+      wrt00 TYPE bp_wpl,
+      wrt01 TYPE bp_wpl,
+      wrt02 TYPE bp_wpl,
+      wrt03 TYPE bp_wpl,
+      wrt04 TYPE bp_wpl,
+      wrt05 TYPE bp_wpl,
+      wrt06 TYPE bp_wpl,
+      wrt07 TYPE bp_wpl,
+      wrt08 TYPE bp_wpl,
+      wrt09 TYPE bp_wpl,
+      wrt10 TYPE bp_wpl,
+      wrt11 TYPE bp_wpl,
+      wrt12 TYPE bp_wpl,
+      wrt13 TYPE bp_wpl,
+      wrt14 TYPE bp_wpl,
+      wrt15 TYPE bp_wpl,
+      wrt16 TYPE bp_wpl,
+    END OF tys_pmco,
+    tyt_pmco TYPE SORTED TABLE OF tys_pmco WITH NON-UNIQUE KEY objnr,
+
+    BEGIN OF tys_objnr,
+      aufnr TYPE aufnr,
+      objnr TYPE j_objnr,
+    END OF tys_objnr,
+    tyt_objnr   TYPE STANDARD TABLE OF tys_objnr,
+    tyt_objnr_h TYPE HASHED TABLE OF tys_objnr WITH UNIQUE KEY aufnr.
+
+  DATA:
+    lt_aufm    TYPE tyt_aufm,
+    lt_objnr   TYPE tyt_objnr,
+    lt_objnr_h TYPE tyt_objnr_h,
+    lt_pmco    TYPE tyt_pmco,
+
+    lv_dmbtr   TYPE dmbtr,
+    lv_waers   TYPE waers,
+    lv_wrt     TYPE bp_wpl,
+
+    lv_index   TYPE i,
+    lv_count   TYPE i,
+    lv_count2  TYPE i.
+
+  FIELD-SYMBOLS:
+    <ls_orderview> LIKE LINE OF gt_orderview,
+    <ls_aufm>      TYPE tys_aufm,
+    <ls_objnr>     TYPE tys_objnr,
+    <lv_wrt>       TYPE bp_wpl,
+    <ls_pmco>      TYPE tys_pmco.
+
+  PERFORM show_progress USING TEXT-l17.
+
+  lt_objnr[] = gt_aufnr_objnr[].
+  SORT lt_objnr BY aufnr.
+  DELETE ADJACENT DUPLICATES FROM lt_objnr COMPARING aufnr.
+  lt_objnr_h[] = lt_objnr[].
+  CLEAR: lt_objnr[].
+
+  "----------------------------------------------------
+  " Selektion der MSEG
+  "----------------------------------------------------
+
+  "alle mit 261/262 lesen; zB. 2016	261	241.340
+  lv_count = lines( gt_orderview ).
+  CHECK lv_count > 0.
+  PERFORM prot_line USING lv_count 'Kosten Material/WSHop-Rate. Anzahl Ordview    :'.
+
+  IF lv_count < 1000.
+    SELECT
+      mblnr
+      aufnr
+      dmbtr
+      waers
+      shkzg
+    FROM aufm
+    INTO TABLE lt_aufm
+      FOR ALL ENTRIES IN gt_orderview
+      WHERE aufnr = gt_orderview-fanumber AND
+            ( bwart = '261' OR
+              bwart = '262' OR
+              bwart = '291' OR   "Buchungen aus PSP-Bestand auf Auftrag
+              bwart = '292' ).
+    "Workshop Rate
+    IF NOT gt_aufnr_objnr[] IS INITIAL.
+      SELECT objnr
+             wrt00
+             wrt01
+             wrt02
+             wrt03
+             wrt04
+             wrt05
+             wrt06
+             wrt07
+             wrt08
+             wrt09
+             wrt10
+             wrt11
+             wrt12
+             wrt13
+             wrt14
+             wrt15
+             wrt16
+        FROM pmco
+        INTO TABLE lt_pmco
+        FOR ALL ENTRIES IN gt_aufnr_objnr
+        WHERE objnr = gt_aufnr_objnr-objnr
+          AND vorga = 'RKL'.   "CO Ist Leistungsverrechnung
+    ENDIF.
+
+  ELSE.
+    "alle lesen
+    SELECT
+      mblnr
+      aufnr
+      dmbtr
+      waers
+      shkzg
+    FROM aufm
+    INTO TABLE lt_aufm
+      WHERE bwart = '261' OR
+            bwart = '262' OR
+            bwart = '291' OR   "Buchungen aus PSP-Bestand auf Auftrag
+            bwart = '292'.
+
+    "Workshop Rate
+    SELECT objnr
+           wrt00
+           wrt01
+           wrt02
+           wrt03
+           wrt04
+           wrt05
+           wrt06
+           wrt07
+           wrt08
+           wrt09
+           wrt10
+           wrt11
+           wrt12
+           wrt13
+           wrt14
+           wrt15
+           wrt16
+      FROM pmco
+      INTO TABLE lt_pmco
+      WHERE vorga = 'RKL'.   "CO Ist Leistungsverrechnung
+
+  ENDIF.
+
+  lv_count  = lines( lt_aufm ).
+  lv_count2 = lines( lt_pmco ).
+
+
+  LOOP AT gt_orderview ASSIGNING <ls_orderview> WHERE fanumber > space.
+    CLEAR:  lv_dmbtr, lv_waers.
+    LOOP AT lt_aufm ASSIGNING <ls_aufm> WHERE aufnr = <ls_orderview>-fanumber.
+      IF  <ls_aufm>-shkzg = 'H'.
+        ADD <ls_aufm>-dmbtr TO lv_dmbtr.
+      ELSE.
+        SUBTRACT <ls_aufm>-dmbtr FROM lv_dmbtr.
+      ENDIF.
+      lv_waers = <ls_aufm>-waers.
+    ENDLOOP.
+    <ls_orderview>-matpreis = lv_dmbtr.
+    <ls_orderview>-mswaers = lv_waers.
+    <ls_orderview>-mwaers = lv_waers.
+
+    "Workshop rate
+    READ TABLE lt_objnr_h ASSIGNING <ls_objnr> WITH TABLE KEY aufnr = <ls_orderview>-fanumber.
+    IF sy-subrc = 0.
+      CLEAR: lv_wrt.
+      LOOP AT lt_pmco ASSIGNING <ls_pmco> WHERE objnr = <ls_objnr>-objnr.
+        lv_index = 1.
+        DO 17 TIMES.  "WRT00 bis WRT16 summieren
+          ADD 1 TO lv_index.
+          ASSIGN COMPONENT lv_index OF STRUCTURE <ls_pmco> TO <lv_wrt>.
+          lv_wrt = lv_wrt + <lv_wrt>.
+        ENDDO.
+      ENDLOOP.
+      <ls_orderview>-workshop_rate =  lv_wrt.
+    ENDIF.
+
+  ENDLOOP.    "AT gt_orderview
+
+  PERFORM prot_line USING lv_count  'Materialkosten aus AUFM   . Anzahl AUFM       :'.
+  PERFORM prot_line USING lv_count2 'Workshoprate aus PMCO   . Anzahl PMCO         :'.
+
+
+ENDFORM.                    " GET_MATKOST_AUFM
+*&---------------------------------------------------------------------*
+*&      Form  SET_KOSTV_REST
+*&---------------------------------------------------------------------*
+*       Es werden offensichtlich nicht alle Aufträge mit Kostv ermittelt
+*       Die fehlenden versuchen zu ermitteln... (KOSTV aber keine Muss)
+*----------------------------------------------------------------------*
+FORM set_kostv_rest .
+
+  TYPES:
+    BEGIN OF tys_aufk,
+      aufnr TYPE aufnr,
+      kostv TYPE aufkostv,                                  "HB040618
+    END OF tys_aufk,
+    tyt_aufk TYPE HASHED TABLE OF tys_aufk WITH UNIQUE KEY aufnr.
+
+  DATA:
+    lt_aufk      TYPE tyt_aufk,
+    lt_orderview TYPE tyt_orderview,
+    lv_count     TYPE i,
+    lv_count2    TYPE i.
+
+  FIELD-SYMBOLS:
+    <ls_orderview> LIKE LINE OF gt_orderview,
+    <ls_aufk>      TYPE tys_aufk.
+
+  "umkopieren in lokale Tabelle und nur die ohne FASTART belassen
+  lt_orderview[] = gt_orderview[].
+  DELETE lt_orderview WHERE fanumber > space
+                        AND kostv    > space.
+
+  syst-tfill = lines( lt_orderview ).
+  PERFORM prot_line USING syst-tfill 'Ohne KOSTV     Anzahl                         :'.
+
+  CHECK NOT lt_orderview[] IS INITIAL.
+
+  SELECT aufnr
+         kostv
+    FROM aufk
+    INTO TABLE lt_aufk
+    FOR ALL ENTRIES IN lt_orderview
+    WHERE aufnr = lt_orderview-fanumber.
+
+  LOOP AT gt_orderview ASSIGNING <ls_orderview> WHERE fanumber > space
+                                                  AND kostv    = space.
+    READ TABLE lt_aufk ASSIGNING <ls_aufk> WITH TABLE KEY aufnr = <ls_orderview>-fanumber.
+    IF sy-subrc = 0.
+      <ls_orderview>-kostv = <ls_aufk>-kostv.
+    ENDIF.
+  ENDLOOP.
+ENDFORM.                    " SET_KOSTV_REST
+*&---------------------------------------------------------------------*
+*&      Form  BEMOT_FROM_ZMIR_POS
+*&---------------------------------------------------------------------*
+*       1807-332 Orderview Berechnungsmotiv ZMIR-Pos VKBeleg
+*       Mögliche  VK-Belege sind der Tabelle gt_vbkd_sel gesammelt
+*       Je Pos, zu denen es noch keine Rückmeldung gibt
+*       Die lesen mit BEMOT
+*----------------------------------------------------------------------*
+FORM bemot_from_zmir_pos .
+
+  DATA:
+    lt_vbap_zmir TYPE tyt_vbkd,
+    lt_vbkd_h    TYPE tyt_vbkd_h2,
+    lv_count     TYPE i.
+
+  FIELD-SYMBOLS:
+    <ls_vbkd>      TYPE tys_vbkd,
+    <ls_vbkd2>     TYPE tys_vbkd,
+    <ls_orderview> LIKE LINE OF gt_orderview.
+
+  CHECK NOT gt_vbkd_sel[] IS INITIAL.
+
+  "ZMIR-Positionen selektieren
+  SELECT vbeln
+         uepos
+         posnr
+    FROM vbap
+    INTO CORRESPONDING FIELDS OF TABLE lt_vbap_zmir
+    FOR ALL ENTRIES IN gt_vbkd_sel
+    WHERE vbeln = gt_vbkd_sel-vbeln
+      AND uepos = gt_vbkd_sel-posnr
+      AND pstyv = 'ZMIR'
+      AND ( abgru = space OR    "HB040222  2202-137 abgesagte ZMIR Positionen
+            abgru = 'ZZ' ).     "zugelassen auch solche mit ZZ manuelle Handlerechnung
+  "gesetzt mit ZFAKTSTATUS_C_SET
+
+  CHECK NOT lt_vbap_zmir[] IS INITIAL.
+
+  "vorhandene BEMOT lesen aus VBKD
+  SELECT vbeln
+         posnr
+         bemot
+    FROM vbkd
+    INTO CORRESPONDING FIELDS OF TABLE lt_vbkd_h
+    FOR ALL ENTRIES IN lt_vbap_zmir
+    WHERE vbeln = lt_vbap_zmir-vbeln
+      AND posnr = lt_vbap_zmir-posnr
+      AND bemot > space.
+
+  CHECK NOT lt_vbkd_h[] IS INITIAL.
+
+  "Abmischen und BEMOT in lt_vbap_zmir übernehmen
+  LOOP AT lt_vbap_zmir ASSIGNING <ls_vbkd>.
+    READ TABLE lt_vbkd_h ASSIGNING <ls_vbkd2> WITH TABLE KEY vbeln = <ls_vbkd>-vbeln
+                                                             posnr = <ls_vbkd>-posnr.
+    IF sy-subrc = 0.
+      <ls_vbkd>-bemot = <ls_vbkd2>-bemot.
+    ELSE.
+      DELETE lt_vbap_zmir.
+    ENDIF.
+  ENDLOOP.
+
+  CHECK NOT lt_vbap_zmir[] IS INITIAL.
+  SORT lt_vbap_zmir BY vbeln uepos.
+  DELETE ADJACENT DUPLICATES FROM lt_vbap_zmir COMPARING vbeln uepos.
+  gt_vbkd_h[] = lt_vbap_zmir[].
+
+  syst-tfill = lines( gt_vbkd_h ).
+  PERFORM prot_line USING syst-tfill 'ZMIR-Pos mit BEMOT     Anzahl                 :'.
+
+  "Bemot austauschen, falls Eintrag in gt_vbkd_h
+  LOOP AT gt_orderview ASSIGNING <ls_orderview> WHERE skz > space.
+    READ TABLE gt_vbkd_h ASSIGNING <ls_vbkd> WITH TABLE KEY vbeln = <ls_orderview>-vbeln
+                                                            uepos = <ls_orderview>-posnr.
+    IF sy-subrc = 0.
+      ADD 1 TO lv_count.
+      <ls_orderview>-skz = <ls_vbkd>-bemot.
+    ENDIF.
+  ENDLOOP.
+
+  IF NOT  lv_count IS INITIAL.
+    PERFORM prot_line USING lv_count 'BEMOT gesetzt aus ZMIR Anzahl                 :'.
+  ENDIF.
+
+ENDFORM.                    " BEMOT_FROM_ZMIR_POS
+*&---------------------------------------------------------------------*
+*&      Form  GET_FASTART_FROM_OLD
+*&---------------------------------------------------------------------*
+*       verwendet gwa_orderview
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM get_fastart_from_old .
+
+  FIELD-SYMBOLS:
+    <ls_ordview> TYPE /cellag/ordview.
+
+  READ TABLE gt_orderview_changed ASSIGNING <ls_ordview> WITH TABLE KEY qmnum   = gwa_orderview-qmnum
+                                                                        fenum   = gwa_orderview-fenum
+                                                                        counter = gwa_orderview-counter.
+  IF sy-subrc = 0.
+    gwa_orderview-fastart = <ls_ordview>-fastart.
+  ENDIF.
+ENDFORM.                    " GET_FASTART_FROM_OLD
+*&---------------------------------------------------------------------*
+*&      Form  GET_ZX_ADD_DATA
+*&---------------------------------------------------------------------*
+*       Alle ZX-Daten lesen mit QWRNUM (Intercompany)
+*       Benötigt um Zusatzdaten wie dockdate, labelprint als ZX zu lesen
+*       s.a. 1908-109 Unschärfe in Orderview - Befüllung der 3 "ZX  Felder"
+*       seit 2015 alle Verknüpfungen über QWRNUM
+*----------------------------------------------------------------------*
+FORM get_zx_qwrnum .
+
+  "alle ZX-Meldungen lesen mit QWRNUM: PA1 08/2019: 69.000
+  SELECT qmnum
+         qwrnum
+    FROM qmel
+    INTO TABLE gt_qwrnum
+    WHERE qmart = 'ZX'
+      AND qwrnum > space.
+
+ENDFORM.                    " GET_ZX_ADD_DATA
+*&---------------------------------------------------------------------*
+*&      Form  GET_QMMA_Z1
+*&---------------------------------------------------------------------*
+*       Aktionen zu den QMFE aus Z1/ZX-Meldungen lesen
+*----------------------------------------------------------------------*
+FORM get_qmma_z1 .
+
+  DATA:
+    lv_count    TYPE i,
+    lv_tdname   TYPE tdobname,
+    lt_tlines   TYPE STANDARD TABLE OF tline,
+
+    lt_qmma_z1  TYPE tyt_qmma_z1,
+    ls_qmma_rem TYPE tys_qmma_rem.
+
+  DATA: ls_thead TYPE thead.
+
+
+  "alle Aktionen zu den Z1/ZX-Meldungen lesen
+  SELECT qmnum
+         manum
+         fenum
+         mngrp
+         matxt
+         erdat
+         ernam
+         erzeit
+         aedat
+         aenam
+         aezeit
+         indtx
+         kzmla
+    FROM qmma
+    INTO CORRESPONDING FIELDS OF TABLE lt_qmma_z1
+    FOR ALL ENTRIES IN gt_qmfe
+    WHERE qmnum    = gt_qmfe-qmnum
+      AND fenum    = gt_qmfe-fenum
+      AND kzloesch = space.          "BHE20240606 RL Orderview Fetch Komment LOEKZ   2406-072
+  IF sy-subrc = 0.
+    lv_count = lines( lt_qmma_z1 ).
+    PERFORM prot_line USING lv_count 'Bemerkungen aus Z1-Meldungen                  :'.
+
+    "Infos aus Langtexten in eigene Zeilen, falls vorhanden  mit eigenem Zeitstempel aus Langtexten
+    LOOP AT lt_qmma_z1 ASSIGNING FIELD-SYMBOL(<ls_qmma_z1>) WHERE indtx = abap_true.
+
+      CONCATENATE <ls_qmma_z1>-qmnum <ls_qmma_z1>-manum INTO lv_tdname.  "Textidentifier
+
+      CLEAR: lt_tlines[].
+      CALL FUNCTION 'READ_TEXT'
+        EXPORTING
+          id                      = 'LTXT'
+          language                = <ls_qmma_z1>-kzmla
+          name                    = lv_tdname
+          object                  = 'QMMA'
+        IMPORTING
+          header                  = ls_thead        "HB011223 wegen Zeitstempel
+        TABLES
+          lines                   = lt_tlines
+        EXCEPTIONS
+          id                      = 1
+          language                = 2
+          name                    = 3
+          not_found               = 4
+          object                  = 5
+          reference_check         = 6
+          wrong_access_to_archive = 7
+          OTHERS                  = 8.
+      IF sy-subrc EQ 0.
+
+        CLEAR: ls_qmma_rem.
+        ls_qmma_rem-qmnum = <ls_qmma_z1>-qmnum.
+        ls_qmma_rem-fenum = <ls_qmma_z1>-fenum.
+        ls_qmma_rem-manum = <ls_qmma_z1>-manum.
+        ls_qmma_rem-mngrp = <ls_qmma_z1>-mngrp.
+        ls_qmma_rem-aedat = ls_thead-tdldate.
+        ls_qmma_rem-aenam = ls_thead-tdluser.
+        ls_qmma_rem-aezeit = ls_thead-tdltime.
+        CLEAR ls_qmma_rem-line.
+
+        LOOP AT lt_tlines ASSIGNING FIELD-SYMBOL(<ls_tlines>).
+*          CONDENSE ls_tlines-tdline.
+          IF ls_qmma_rem-line IS INITIAL.
+            ls_qmma_rem-line = <ls_tlines>-tdline.
+          ELSE.
+            CONCATENATE ls_qmma_rem-line <ls_tlines>-tdline INTO ls_qmma_rem-line.
+          ENDIF.
+        ENDLOOP.
+        APPEND ls_qmma_rem TO gt_qmma_rem_z1.
+
+      ENDIF.
+    ENDLOOP.
+
+    "Jetzt rem bauen für eigentliche Maßnahmen und anhängen
+    LOOP AT lt_qmma_z1 ASSIGNING <ls_qmma_z1>.
+
+      "AEDAT belegen aus ERDAT falls leer
+      IF <ls_qmma_z1>-aedat IS INITIAL.
+        <ls_qmma_z1>-aedat  = <ls_qmma_z1>-erdat.
+        <ls_qmma_z1>-aenam  = <ls_qmma_z1>-ernam.
+        <ls_qmma_z1>-aezeit = <ls_qmma_z1>-erzeit.
+      ENDIF.
+
+      "jetzt anhängen an Gesamtliste
+      CLEAR: ls_qmma_rem.
+      ls_qmma_rem-qmnum = <ls_qmma_z1>-qmnum.
+      ls_qmma_rem-fenum = <ls_qmma_z1>-fenum.
+      ls_qmma_rem-manum = <ls_qmma_z1>-manum.
+      ls_qmma_rem-mngrp = <ls_qmma_z1>-mngrp.
+      ls_qmma_rem-aedat = <ls_qmma_z1>-aedat.
+      ls_qmma_rem-aenam = <ls_qmma_z1>-aenam.
+      ls_qmma_rem-aezeit = <ls_qmma_z1>-aezeit.
+      ls_qmma_rem-line   = <ls_qmma_z1>-matxt.
+      APPEND ls_qmma_rem TO gt_qmma_rem_z1.
+    ENDLOOP.
+  ENDIF.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  MERGE_REMARKS_REM
+*&---------------------------------------------------------------------*
+*       Es gibt sowohl Bemerkungen aus Z1-Meldungen (neu ab 11.2023),
+*       also auch zu den Z2-Meldungen (wie bisher)
+*       Add-Einträge zu Z1-Meldungen ohne Z2 werden neu angelegt.
+*       Gibt es auch Z2-Bemerkungen werden die Z1-Bemerkungen dazugemischt.
+*       Annahme: Die Z1-Bemerkungen waren zuerst da, deshalb Texte zuerst
+*       oben einfügen.
+*
+*       gt_orderview_add wird wie bisher aus den Aktionen zu Z2 erstellt
+*       in gt_qmma_z1 werden die Textinfos aus den Z1-Meldungen bereitgestellt
+*
+*       Vorgehensweise: da gt_orderview_add kein schneller Zugriff, diese
+*       durchschleifen und jeweils prüfen ob Z1-Texte da. falls gefunden,
+*       diese markieren mit F = found
+*       Anschließend aus den nicht mit F-markierten zusätzliche Einträge
+*       anhängen an gt_orderview_add
+*----------------------------------------------------------------------*
+FORM merge_remarks_rem .
+
+  DATA:
+    lv_count         TYPE i,
+    lv_no_save       TYPE abap_bool,
+    lv_found         TYPE abap_bool,
+    lv_line          TYPE rtxline,
+
+    ls_orderview_add LIKE LINE OF gt_orderview_add,
+    lt_orderview_add TYPE STANDARD TABLE OF /cellag/ord_add.
+
+  "beide Tabellen zusammenmischen und sortieren pro Meldpos; neueste oben
+  APPEND LINES OF gt_qmma_rem_z1 TO gt_qmma_rem_z2.
+  SORT gt_qmma_rem_z2 BY qmnum ASCENDING fenum ASCENDING aedat DESCENDING aezeit DESCENDING
+                         manum ASCENDING.  "Falls gleiche Uhrezeit - dann nach MANUM
+
+
+  LOOP AT gt_orderview_add ASSIGNING FIELD-SYMBOL(<ls_orderview_add>).
+
+    "Bemerkungsfelder INIT
+    CLEAR:
+      <ls_orderview_add>-remarksrs,
+      <ls_orderview_add>-timestamprs,
+
+      <ls_orderview_add>-remarksoc,
+      <ls_orderview_add>-timestampoc,
+
+      <ls_orderview_add>-remarksvm,
+      <ls_orderview_add>-timestampvm,
+
+      <ls_orderview_add>-remarksspm,
+      <ls_orderview_add>-timestampspm,
+
+      <ls_orderview_add>-remarkspur,
+      <ls_orderview_add>-timestamppur,
+
+      <ls_orderview_add>-remarkslog,
+      <ls_orderview_add>-timestamplog.
+
+
+
+    LOOP AT gt_qmma_rem_z2 ASSIGNING FIELD-SYMBOL(<ls_qmma_rem>) WHERE qmnum = <ls_orderview_add>-qmnum
+                                                                   AND fenum = <ls_orderview_add>-fenum.
+      <ls_qmma_rem>-flag = 'X'.  "markieren vorhanden
+
+      CASE <ls_qmma_rem>-mngrp.
+
+        WHEN 'ZRRS01'.   "Repairshop
+          IF <ls_orderview_add>-remarksrs IS INITIAL.
+            <ls_orderview_add>-remarksrs = <ls_qmma_rem>-line.
+          ELSE.
+            IF <ls_qmma_rem>-line IS NOT INITIAL.  "2405-180 RL Orderview Fetch Kommentare / am Ende
+              CONCATENATE   <ls_orderview_add>-remarksrs '/' <ls_qmma_rem>-line
+                INTO <ls_orderview_add>-remarksrs.
+            ENDIF.
+          ENDIF.
+          IF <ls_orderview_add>-timestamprs IS INITIAL.
+            <ls_orderview_add>-timestamprs = <ls_qmma_rem>-aedat.
+          ENDIF.
+
+        WHEN 'ZROC01'.   "Order control
+          IF <ls_orderview_add>-remarksoc IS INITIAL.
+            <ls_orderview_add>-remarksoc = <ls_qmma_rem>-line.
+          ELSE.
+            IF <ls_qmma_rem>-line IS NOT INITIAL.
+              CONCATENATE <ls_orderview_add>-remarksoc '/' <ls_qmma_rem>-line
+                INTO <ls_orderview_add>-remarksoc.
+            ENDIF.
+          ENDIF.
+          IF <ls_orderview_add>-timestampoc IS INITIAL.
+            <ls_orderview_add>-timestampoc = <ls_qmma_rem>-aedat.
+          ENDIF.
+
+        WHEN 'ZRVM01'.   "Vendor Management
+          IF <ls_orderview_add>-remarksvm IS INITIAL.
+            <ls_orderview_add>-remarksvm = <ls_qmma_rem>-line.
+          ELSE.
+            IF <ls_qmma_rem>-line IS NOT INITIAL.
+              CONCATENATE <ls_orderview_add>-remarksvm  '/' <ls_qmma_rem>-line
+                INTO <ls_orderview_add>-remarksvm.
+            ENDIF.
+          ENDIF.
+          IF <ls_orderview_add>-timestampvm IS INITIAL.
+            <ls_orderview_add>-timestampvm = <ls_qmma_rem>-aedat.
+          ENDIF.
+
+        WHEN 'ZRSP01'.   "SpareParsManagement
+          IF <ls_orderview_add>-remarksspm IS INITIAL.
+            <ls_orderview_add>-remarksspm = <ls_qmma_rem>-line.
+          ELSE.
+            IF <ls_qmma_rem>-line IS NOT INITIAL.
+              CONCATENATE <ls_orderview_add>-remarksspm '/'  <ls_qmma_rem>-line
+                INTO <ls_orderview_add>-remarksspm.
+            ENDIF.
+          ENDIF.
+          IF <ls_orderview_add>-timestampspm IS INITIAL.
+            <ls_orderview_add>-timestampspm = <ls_qmma_rem>-aedat.
+          ENDIF.
+
+        WHEN 'ZRPU01'.   "Purschasing
+          IF <ls_orderview_add>-remarkspur IS INITIAL.
+            <ls_orderview_add>-remarkspur = <ls_qmma_rem>-line.
+          ELSE.
+            IF <ls_qmma_rem>-line IS NOT INITIAL.
+              CONCATENATE  <ls_orderview_add>-remarkspur '/' <ls_qmma_rem>-line
+                INTO <ls_orderview_add>-remarkspur.
+            ENDIF.
+          ENDIF.
+          IF <ls_orderview_add>-timestamppur IS INITIAL.
+            <ls_orderview_add>-timestamppur = <ls_qmma_rem>-aedat.
+          ENDIF.
+
+
+        WHEN 'ZRLO01'.   "Logistik
+          IF <ls_orderview_add>-remarkslog IS INITIAL.
+            <ls_orderview_add>-remarkslog = <ls_qmma_rem>-line.
+          ELSE.
+            IF <ls_qmma_rem>-line IS NOT INITIAL.
+              CONCATENATE <ls_orderview_add>-remarkslog '/' <ls_qmma_rem>-line
+                INTO <ls_orderview_add>-remarkslog.
+            ENDIF.
+          ENDIF.
+          IF <ls_orderview_add>-timestamplog IS INITIAL.
+            <ls_orderview_add>-timestamplog = <ls_qmma_rem>-aedat.
+          ENDIF.
+
+      ENDCASE.
+    ENDLOOP. "AT gt_qmma_rem_z2
+  ENDLOOP.
+
+  "---------------------------------------------------------------------------------
+  "  neue Zeilen, falls bisher noch nicht vorhanden
+  "---------------------------------------------------------------------------------
+  CLEAR: ls_orderview_add.
+
+  LOOP AT gt_qmma_rem_z2 ASSIGNING <ls_qmma_rem> WHERE flag = space.
+
+    IF NOT ( <ls_qmma_rem>-qmnum = ls_orderview_add-qmnum AND <ls_qmma_rem>-fenum = ls_orderview_add-fenum ).
+      IF NOT ls_orderview_add IS INITIAL.
+        APPEND ls_orderview_add TO lt_orderview_add.
+      ENDIF.
+      CLEAR: ls_orderview_add.
+      ls_orderview_add-qmnum   = <ls_qmma_rem>-qmnum.
+      ls_orderview_add-fenum   = <ls_qmma_rem>-fenum.
+      ls_orderview_add-counter = 1.  "???
+      ls_orderview_add-aedat = <ls_qmma_rem>-aedat.
+      ls_orderview_add-aeuhr = <ls_qmma_rem>-aezeit.
+      ls_orderview_add-aenam = <ls_qmma_rem>-aenam.
+    ENDIF.
+
+
+    CASE <ls_qmma_rem>-mngrp.
+
+      WHEN 'ZRRS01'.   "Repairshop
+        IF ls_orderview_add-remarksrs IS NOT INITIAL.
+          "Text dranhängen, falls mehrere Aktionen
+          IF <ls_qmma_rem>-line IS NOT INITIAL.
+            CONCATENATE ls_orderview_add-remarksrs '/'  <ls_qmma_rem>-line INTO ls_orderview_add-remarksrs.
+          ENDIF.
+        ELSE.
+          ls_orderview_add-remarksrs = <ls_qmma_rem>-line.
+        ENDIF.
+        IF ls_orderview_add-timestamprs IS INITIAL.
+          ls_orderview_add-timestamprs = <ls_qmma_rem>-aedat.
+        ENDIF.
+
+      WHEN 'ZROC01'.   "Order control
+        IF ls_orderview_add-remarksoc IS NOT INITIAL.
+          "Text dranhängen, falls mehrere Aktionen
+          IF <ls_qmma_rem>-line IS NOT INITIAL.
+            CONCATENATE ls_orderview_add-remarksoc '/'  <ls_qmma_rem>-line INTO ls_orderview_add-remarksoc.
+          ENDIF.
+        ELSE.
+          ls_orderview_add-remarksoc = <ls_qmma_rem>-line.
+        ENDIF.
+        IF ls_orderview_add-timestampoc IS INITIAL.
+          ls_orderview_add-timestampoc = <ls_qmma_rem>-aedat.
+        ENDIF.
+
+      WHEN 'ZRVM01'.   "Vendor Management
+        IF ls_orderview_add-remarksvm IS NOT INITIAL.
+          "Text dranhängen, falls mehrere Aktionen
+          IF <ls_qmma_rem>-line IS NOT INITIAL.
+            CONCATENATE ls_orderview_add-remarksvm '/'  <ls_qmma_rem>-line INTO ls_orderview_add-remarksvm.
+          ENDIF.
+        ELSE.
+          ls_orderview_add-remarksvm = <ls_qmma_rem>-line.
+        ENDIF.
+        IF ls_orderview_add-timestampvm IS INITIAL.
+          ls_orderview_add-timestampvm = <ls_qmma_rem>-aedat.
+        ENDIF.
+
+      WHEN 'ZRSP01'.   "SpareParsManagement
+        IF ls_orderview_add-remarksspm IS NOT INITIAL.
+          "Text dranhängen, falls mehrere Aktionen
+          IF <ls_qmma_rem>-line IS NOT INITIAL.
+            CONCATENATE ls_orderview_add-remarksspm '/'  <ls_qmma_rem>-line INTO ls_orderview_add-remarksspm.
+          ENDIF.
+        ELSE.
+          ls_orderview_add-remarksspm = <ls_qmma_rem>-line.
+        ENDIF.
+        IF ls_orderview_add-timestampspm IS INITIAL.
+          ls_orderview_add-timestampspm = <ls_qmma_rem>-aedat.
+        ENDIF.
+
+      WHEN 'ZRPU01'.   "Purschasing
+        IF ls_orderview_add-remarkspur IS NOT INITIAL.
+          "Text dranhängen, falls mehrere Aktionen
+          IF <ls_qmma_rem>-line IS NOT INITIAL.
+            CONCATENATE ls_orderview_add-remarkspur '/'  <ls_qmma_rem>-line INTO ls_orderview_add-remarkspur.
+          ENDIF.
+        ELSE.
+          ls_orderview_add-remarkspur = <ls_qmma_rem>-line.
+        ENDIF.
+        IF ls_orderview_add-timestamppur IS INITIAL.
+          ls_orderview_add-timestamppur = <ls_qmma_rem>-aedat.
+        ENDIF.
+
+      WHEN 'ZRLO01'.   "Logistik
+        IF ls_orderview_add-remarkslog IS NOT INITIAL.
+          "Text dranhängen, falls mehrere Aktionen
+          IF <ls_qmma_rem>-line IS NOT INITIAL.
+            CONCATENATE ls_orderview_add-remarkslog '/'  <ls_qmma_rem>-line INTO ls_orderview_add-remarkslog.
+          ENDIF.
+        ELSE.
+          ls_orderview_add-remarkslog = <ls_qmma_rem>-line.
+        ENDIF.
+        IF ls_orderview_add-timestamplog IS INITIAL.
+          ls_orderview_add-timestamplog = <ls_qmma_rem>-aedat.
+        ENDIF.
+
+    ENDCASE.
+
+  ENDLOOP.  "LOOP AT ggt_qmma_rem_z2
+
+  "letzer Satz
+  IF NOT ls_orderview_add IS INITIAL.
+    APPEND ls_orderview_add TO lt_orderview_add.
+  ENDIF.
+
+  IF NOT lt_orderview_add[] IS  INITIAL.
+
+    lv_count = lines( lt_orderview_add ).
+    PERFORM prot_line USING lv_count 'Neue Einträge ADD Bemerkungen aus Z1-Meldungen:'.
+
+    APPEND LINES OF lt_orderview_add TO gt_orderview_add.
+  ENDIF.
+
+  "GSI-Bemerkung ergänzen; in der gesamten DB gibt es keine Einträge QMMA mit QMANUM = 9999
+  "Bemerkungen GSI addiert die Texte der Kommentarfelder im ORDERVIEW in folgender Reihenfolge
+  "Repairshop + Logistik + Vendormanagement + SPM + Purchasing
+  LOOP AT gt_orderview_add ASSIGNING <ls_orderview_add>.
+
+    CLEAR: <ls_orderview_add>-gsiremarks.
+
+    IF <ls_orderview_add>-remarksrs IS NOT INITIAL.
+      <ls_orderview_add>-gsiremarks = <ls_orderview_add>-remarksrs.
+    ENDIF.
+
+    IF <ls_orderview_add>-remarkslog IS NOT INITIAL.
+      IF <ls_orderview_add>-gsiremarks IS INITIAL.
+        <ls_orderview_add>-gsiremarks = <ls_orderview_add>-remarkslog.
+      ELSE.
+        CONCATENATE <ls_orderview_add>-gsiremarks '/' <ls_orderview_add>-remarkslog INTO <ls_orderview_add>-gsiremarks.
+      ENDIF.
+    ENDIF.
+
+    IF <ls_orderview_add>-remarksvm IS NOT INITIAL.
+      IF <ls_orderview_add>-gsiremarks IS INITIAL.
+        <ls_orderview_add>-gsiremarks = <ls_orderview_add>-remarksvm.
+      ELSE.
+        CONCATENATE <ls_orderview_add>-gsiremarks '/' <ls_orderview_add>-remarksvm INTO <ls_orderview_add>-gsiremarks.
+      ENDIF.
+    ENDIF.
+
+    IF <ls_orderview_add>-remarksspm IS NOT INITIAL.
+      IF <ls_orderview_add>-gsiremarks IS INITIAL.
+        <ls_orderview_add>-gsiremarks = <ls_orderview_add>-remarksspm.
+      ELSE.
+        CONCATENATE <ls_orderview_add>-gsiremarks '/' <ls_orderview_add>-remarksspm INTO <ls_orderview_add>-gsiremarks.
+      ENDIF.
+    ENDIF.
+
+    IF <ls_orderview_add>-remarkspur IS NOT INITIAL.
+      IF <ls_orderview_add>-gsiremarks IS INITIAL.
+        <ls_orderview_add>-gsiremarks = <ls_orderview_add>-remarkspur.
+      ELSE.
+        CONCATENATE <ls_orderview_add>-gsiremarks '/' <ls_orderview_add>-remarkspur INTO <ls_orderview_add>-gsiremarks.
+      ENDIF.
+    ENDIF.
+
+  ENDLOOP.
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  ADD_COMMENTS_ZRSP01
+*&---------------------------------------------------------------------*
+*       Mit ZCL_ORDER_DATA_FETCH=>CREATE_Z2_MMA_ZRSP01 angelegte Aktionen
+*       werden direkt nach dem Anlegen nicht in ORDER_ADD aktualisiert
+*       Workaround: direkt in ORDER_ADD-Tabelle schrieben; lediglich REMARKSSPM
+*       es sind sehr wenige Fälle pro Tag ( 1, 2?)
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM add_comments_zrsp01 .
+
+  DATA:
+    ls_order_add TYPE /cellag/ord_add.
+
+  LOOP AT gt_nomat ASSIGNING FIELD-SYMBOL(<ls_nomat>).
+
+    CLEAR: ls_order_add.
+
+    "gibts Satz schon?
+    SELECT SINGLE * FROM /cellag/ord_add
+      WHERE qmnum   = @<ls_nomat>-qmnum
+        AND fenum   = @<ls_nomat>-fenum
+        AND counter = @<ls_nomat>-counter
+      INTO @ls_order_add.
+
+    IF sy-subrc = 0.
+      "vorhandenen Satz Kommentar und Zeitstempel anpassen
+      IF ls_order_add-remarksspm IS INITIAL.
+        ls_order_add-remarksspm = <ls_nomat>-matxt.
+      ELSE.
+        IF NOT <ls_nomat>-matxt IS INITIAL.
+          CONCATENATE ls_order_add-remarksspm <ls_nomat>-matxt INTO ls_order_add-remarksspm SEPARATED BY '/'.
+        ENDIF.
+      ENDIF.
+      ls_order_add-timestampspm = sy-datum.
+
+      ls_order_add-aedat = sy-datum.
+      ls_order_add-aeuhr = sy-uzeit.
+      ls_order_add-aenam = sy-uname.
+      UPDATE /cellag/ord_add FROM ls_order_add.
+
+    ELSE.
+      "anlegen
+      ls_order_add-qmnum = <ls_nomat>-qmnum.
+      ls_order_add-fenum = <ls_nomat>-fenum.
+      ls_order_add-counter = <ls_nomat>-counter.
+      ls_order_add-qmnum_z2 = <ls_nomat>-qmnum_z2.
+
+      ls_order_add-remarksspm = <ls_nomat>-matxt.
+      ls_order_add-timestampspm = sy-datum.
+
+      ls_order_add-aedat = sy-datum.
+      ls_order_add-aeuhr = sy-uzeit.
+      ls_order_add-aenam = sy-uname.
+      INSERT /cellag/ord_add FROM ls_order_add.
+
+    ENDIF.
+
+    COMMIT WORK.
+  ENDLOOP.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  DO_ZORDVIEW_CLOS_EX
+*&---------------------------------------------------------------------*
+*       Verarbeitung der Tabelle ZORDVIEW_CLOS_EX
+*----------------------------------------------------------------------*
+FORM do_zordview_clos_ex .
+
+  DATA:
+    lv_text_60      TYPE text60,
+    lv_change_count TYPE i.
+
+  CALL METHOD zcl_order_data_fetch=>check_zordview_clos_ex
+    IMPORTING
+      ev_text_60      = lv_text_60
+      ev_change_count = lv_change_count.
+
+  PERFORM prot_line USING lv_change_count lv_text_60.
+
+ENDFORM.

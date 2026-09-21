@@ -1,0 +1,230 @@
+*&---------------------------------------------------------------------*
+*&  Include           /CELLAG/ORDERVIEW_SEL
+*&---------------------------------------------------------------------*
+SELECTION-SCREEN: BEGIN OF SCREEN 0100 AS SUBSCREEN.
+
+SELECTION-SCREEN: BEGIN OF BLOCK block3 WITH FRAME TITLE TEXT-s02.
+SELECT-OPTIONS: s_qmnump FOR gv_qmnump NO INTERVALS.
+SELECTION-SCREEN: END OF BLOCK block3.
+
+SELECTION-SCREEN: BEGIN OF BLOCK block4 WITH FRAME TITLE TEXT-s03.
+SELECTION-SCREEN: BEGIN OF BLOCK block2 WITH FRAME TITLE TEXT-s01.
+*KKU 2104-012 Umbau zum Highlighten
+SELECTION-SCREEN BEGIN OF LINE.
+PARAMETERS: pa_sel01 RADIOBUTTON GROUP g1.
+SELECTION-SCREEN POSITION 1.
+SELECTION-SCREEN COMMENT 3(30) TEXT-anl MODIF ID mg1.
+SELECTION-SCREEN END OF LINE.
+*KKU End
+PARAMETERS: "pa_sel01 RADIOBUTTON GROUP g1,  "anlage        "KKU
+            pa_sel02 RADIOBUTTON GROUP g1.  "dockdate
+*KKU 2104-012 Umbau zum Highlighten
+SELECTION-SCREEN BEGIN OF LINE.
+PARAMETERS: pa_sel03 RADIOBUTTON GROUP g1.
+SELECTION-SCREEN POSITION 1.
+SELECTION-SCREEN COMMENT 3(30) TEXT-wae MODIF ID mg1.
+SELECTION-SCREEN END OF LINE.
+*KKU End
+PARAMETERS: "pa_sel03 RADIOBUTTON GROUP g1,  "wareneingang      "KKU
+            pa_sel13 RADIOBUTTON GROUP g1.  "FA Vendorvorgang FASTART
+*KKU 2104-012 Umbau zum Highlighten
+SELECTION-SCREEN BEGIN OF LINE.
+PARAMETERS: pa_sel04 RADIOBUTTON GROUP g1.
+SELECTION-SCREEN POSITION 1.
+SELECTION-SCREEN COMMENT 3(30) TEXT-fae MODIF ID mg1.
+SELECTION-SCREEN END OF LINE.
+SELECTION-SCREEN BEGIN OF LINE.
+PARAMETERS: pa_sel05 RADIOBUTTON GROUP g1.
+SELECTION-SCREEN POSITION 1.
+SELECTION-SCREEN COMMENT 3(30) TEXT-res MODIF ID mg1.
+SELECTION-SCREEN END OF LINE.
+SELECTION-SCREEN BEGIN OF LINE.
+PARAMETERS: pa_sel06 RADIOBUTTON GROUP g1.
+SELECTION-SCREEN POSITION 1.
+SELECTION-SCREEN COMMENT 3(30) TEXT-lid MODIF ID mg1.
+SELECTION-SCREEN END OF LINE.
+*KKU End
+PARAMETERS: "pa_sel04 RADIOBUTTON GROUP g1,  "faend       "KKU
+  " pa_sel05 RADIOBUTTON GROUP g1,  "rsende      "KKU
+  "pa_sel06 RADIOBUTTON GROUP g1,  "liefer      "KKU
+  pa_sel07 RADIOBUTTON GROUP g1,  "einlager
+  pa_sel08 RADIOBUTTON GROUP g1,  "tovend
+  pa_sel09 RADIOBUTTON GROUP g1.  "fromvend
+*KKU 2209-225 Umbau zum Highlighten
+SELECTION-SCREEN BEGIN OF LINE.
+PARAMETERS:pa_sel10 RADIOBUTTON GROUP g1.  "auftragsendesoll
+SELECTION-SCREEN POSITION 1.
+SELECTION-SCREEN COMMENT 3(30) TEXT-aes MODIF ID mg1.
+SELECTION-SCREEN END OF LINE.
+*  pa_sel10 RADIOBUTTON GROUP g1,  "auftragsendesoll
+*KKU End
+PARAMETERS:  pa_sel11 RADIOBUTTON GROUP g1.  "actcomm
+"pa_sel12 RADIOBUTTON GROUP g1.  "Dateclosed    "KKU
+*KKU 2104-012 Umbau zum Highlighten
+SELECTION-SCREEN BEGIN OF LINE.
+PARAMETERS: pa_sel12 RADIOBUTTON GROUP g1.
+SELECTION-SCREEN POSITION 1.
+SELECTION-SCREEN COMMENT 3(30) TEXT-dac MODIF ID mg1.
+SELECTION-SCREEN END OF LINE.
+*KKU End
+SELECT-OPTIONS: s_orded FOR /cellag/ordview-orderdate NO-EXTENSION.
+SELECTION-SCREEN: END OF BLOCK block2.
+
+SELECTION-SCREEN: BEGIN OF BLOCK block1 WITH FRAME TITLE TEXT-s00.
+SELECT-OPTIONS: s_werks FOR /cellag/ordview-werks,
+                s_otgrp FOR /cellag/ordview-otgrp,
+                s_qmnum FOR /cellag/ordview-qmnum,
+                s_qmart FOR /cellag/ordview-qmart.          "HB110713
+"s_vbeln FOR /cellag/ordview-vbeln.         "KKU
+*KKU 2104-012 Umbau zum Highlighten
+SELECTION-SCREEN BEGIN OF LINE.
+SELECTION-SCREEN: COMMENT 1(28) TEXT-vbe FOR FIELD s_vbeln MODIF ID mg1.
+SELECTION-SCREEN POSITION 28.
+SELECT-OPTIONS: s_vbeln FOR /cellag/ordview-vbeln.
+SELECTION-SCREEN END OF LINE.
+*KKU End
+SELECTION-SCREEN: BEGIN OF LINE.
+SELECTION-SCREEN: COMMENT 1(24) TEXT-s13 FOR FIELD s_fanum MODIF ID mg1. "KKU Modif ID
+SELECTION-SCREEN POSITION 28.
+SELECT-OPTIONS: s_fanum FOR /cellag/ordview-fanumber.
+SELECTION-SCREEN: END OF LINE.
+SELECT-OPTIONS: s_prozs FOR /cellag/ordview-prozesstyp,
+                s_kunag FOR /cellag/ordview-kundennummer,
+                s_kunwe FOR /cellag/ordview-shipto,
+                s_vendo FOR /cellag/ordview-vendornummer.   "HB160715
+"                s_kdgrp FOR /cellag/ordview-customergroup, "KKU
+*KKU 2104-012 Umbau zum Highlighten
+SELECTION-SCREEN BEGIN OF LINE.
+SELECTION-SCREEN: COMMENT 1(28) TEXT-kga FOR FIELD s_kdgrp MODIF ID mg1.
+SELECTION-SCREEN POSITION 28.
+SELECT-OPTIONS: s_kdgrp FOR /cellag/ordview-customergroup.
+SELECTION-SCREEN END OF LINE.
+*KKU End
+SELECT-OPTIONS: s_kdgwe FOR /cellag/ordview-customergroupwe,
+                s_akz FOR /cellag/ordview-akz,
+                s_skz FOR /cellag/ordview-skz,
+                s_pspnr FOR /cellag/ordview-ps_psp_pnr,     "HB121113
+                s_wktnr FOR /cellag/ordview-wktnr,
+                s_mfrnr FOR /cellag/ordview-hersteller,
+                s_kutec FOR /cellag/ordview-kundetechcode,
+                s_sydes FOR /cellag/ordview-systemdescr,
+                s_prior FOR /cellag/ord_add-priority,
+                s_techc FOR /cellag/ordview-techcode,
+                s_statu FOR /cellag/ord_add-status,
+                s_overd FOR /cellag/ordview-overdue,
+                s_tat FOR /cellag/ordview-tat,
+                s_archi FOR /cellag/ordview-archivflag,
+                s_matnr FOR /cellag/ordview-ctdisapmatnummer,
+                s_parta FOR /cellag/ordview-partnumberalc,
+                s_normt FOR /cellag/ordview-normt,
+                s_partin FOR /cellag/ordview-partnumberin,  "HB160715
+                s_usr08 FOR /cellag/ordview-qmfe_usr08.     "HB060514
+SELECTION-SCREEN: BEGIN OF LINE.
+SELECTION-SCREEN: COMMENT 1(28) TEXT-s10 FOR FIELD s_sernr.
+SELECTION-SCREEN POSITION 28.
+SELECT-OPTIONS: s_sernr FOR /cellag/ordview-serialmeld.
+SELECTION-SCREEN: END OF LINE.
+SELECTION-SCREEN: BEGIN OF LINE.
+SELECTION-SCREEN: COMMENT 1(27) TEXT-s11 FOR FIELD s_serrc.
+SELECTION-SCREEN POSITION 28.
+SELECT-OPTIONS: s_serrc FOR /cellag/ordview-serialrec.
+SELECTION-SCREEN: END OF LINE.
+SELECTION-SCREEN: BEGIN OF LINE.
+SELECTION-SCREEN: COMMENT 1(30) TEXT-s12 FOR FIELD s_serlf.
+SELECTION-SCREEN POSITION 28.
+SELECT-OPTIONS: s_serlf FOR /cellag/ordview-serialdeliver.
+SELECTION-SCREEN: END OF LINE.
+
+SELECT-OPTIONS: s_ebeln FOR /cellag/ordview-purchaseorder,
+                s_ebel2 FOR /cellag/ordview-purchaseorder2,
+                s_ausso FOR /cellag/ordview-aussonderung,
+                s_ready FOR /cellag/ordview-readytoship,
+                s_prctr FOR /cellag/ordview-prctr,
+                s_faktu FOR /cellag/ordview-rechnummer,
+                s_fkstk FOR /cellag/ordview-fkstk.          "MK281116
+"s_orddt FOR /cellag/ordview-orderdate NO-EXTENSION,      "KKU
+*KKU 2104-012 Umbau zum Highlighten
+SELECTION-SCREEN BEGIN OF LINE.
+SELECTION-SCREEN: COMMENT 1(28) TEXT-odd FOR FIELD s_orddt MODIF ID mg1.
+SELECTION-SCREEN POSITION 28.
+SELECT-OPTIONS: s_orddt FOR /cellag/ordview-orderdate NO-EXTENSION.
+SELECTION-SCREEN END OF LINE.
+*KKU End
+SELECT-OPTIONS: s_ymds  FOR /cellag/ordview-ymds.   "HB251019  1909-676
+
+SELECTION-SCREEN: SKIP.
+SELECTION-SCREEN BEGIN OF LINE.
+PARAMETERS: pa_highr AS CHECKBOX.
+SELECTION-SCREEN COMMENT 3(23) TEXT-001.
+PARAMETERS: pa_outof AS CHECKBOX.
+SELECTION-SCREEN COMMENT 29(19) TEXT-002.
+SELECTION-SCREEN END OF LINE.
+
+
+SELECTION-SCREEN: END OF BLOCK block1.
+
+* Auftragsstatus
+SELECTION-SCREEN: BEGIN OF BLOCK block5 WITH FRAME TITLE TEXT-s04.
+SELECTION-SCREEN: BEGIN OF LINE.
+PARAMETERS: pa_open AS CHECKBOX DEFAULT c_true.
+SELECTION-SCREEN: COMMENT 3(23) TEXT-006.
+PARAMETERS: pa_clos AS CHECKBOX DEFAULT c_true.
+SELECTION-SCREEN: COMMENT 29(19) TEXT-007.
+PARAMETERS: pa_dele AS CHECKBOX.
+SELECTION-SCREEN COMMENT 51(28) TEXT-008.
+SELECTION-SCREEN: END OF LINE.
+SELECTION-SCREEN: END OF BLOCK block5.
+
+*Archvizugriff
+SELECTION-SCREEN: BEGIN OF BLOCK block11 WITH FRAME TITLE TEXT-s14.
+
+SELECTION-SCREEN BEGIN OF LINE.                             "HB071021
+PARAMETERS: pa_archi AS CHECKBOX.
+SELECTION-SCREEN COMMENT 3(23) TEXT-009.
+SELECTION-SCREEN PUSHBUTTON 27(25) but1 USER-COMMAND yz.
+SELECTION-SCREEN END OF LINE.
+SELECTION-SCREEN: END OF BLOCK block11.
+
+
+SELECTION-SCREEN: END OF BLOCK block4.
+
+* Variante
+SELECTION-SCREEN: BEGIN OF BLOCK block6 WITH FRAME TITLE TEXT-s05.
+PARAMETERS: pa_spras TYPE sy-langu,
+            pa_vari  LIKE disvariant-variant.
+SELECTION-SCREEN: END OF BLOCK block6.
+
+SELECTION-SCREEN: END OF SCREEN 0100.
+
+* Subscreen 0200
+SELECTION-SCREEN: BEGIN OF SCREEN 0200 AS SUBSCREEN.
+SELECTION-SCREEN: BEGIN OF BLOCK block7 WITH FRAME TITLE TEXT-s06.
+PARAMETERS: pa_rueck AS CHECKBOX.
+* Anzeigeumfang
+SELECTION-SCREEN: BEGIN OF BLOCK block8 WITH FRAME TITLE TEXT-s07.
+PARAMETERS: pa_aller RADIOBUTTON GROUP g2,
+            pa_ruecr RADIOBUTTON GROUP g2.
+SELECTION-SCREEN: END OF BLOCK block8.
+* Vorwärts-Rückwärts
+SELECTION-SCREEN: BEGIN OF BLOCK block9 WITH FRAME TITLE TEXT-s08.
+PARAMETERS: pa_ruewa RADIOBUTTON GROUP g3,
+            pa_vorwa RADIOBUTTON GROUP g3.
+
+SELECTION-SCREEN: END OF BLOCK block9.
+* Zeitraum
+SELECTION-SCREEN: BEGIN OF BLOCK block10 WITH FRAME TITLE TEXT-s09.
+PARAMETERS: pa_01mon RADIOBUTTON GROUP g4,
+            pa_03mon RADIOBUTTON GROUP g4,
+            pa_06mon RADIOBUTTON GROUP g4,
+            pa_12mon RADIOBUTTON GROUP g4,
+            pa_rudat TYPE sy-datum.
+SELECTION-SCREEN: END OF BLOCK block10.
+SELECTION-SCREEN: END OF BLOCK block7.
+SELECTION-SCREEN: END OF SCREEN 0200.
+
+SELECTION-SCREEN: BEGIN OF TABBED BLOCK selblock FOR 100 LINES.
+SELECTION-SCREEN: TAB (20) pa_sel1 USER-COMMAND sel1
+                  DEFAULT SCREEN 0100,
+                  TAB (20) pa_sel2 USER-COMMAND sel2
+                  DEFAULT SCREEN 0200.
+SELECTION-SCREEN: END OF BLOCK selblock.

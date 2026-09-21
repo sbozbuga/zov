@@ -1,0 +1,18 @@
+@EndUserText.label : 'Maximale Durchlaufzeit eines Reparaturprozesses'
+@AbapCatalog.enhancement.category : #EXTENSIBLE_CHARACTER_NUMERIC
+@AbapCatalog.tableCategory : #TRANSPARENT
+@AbapCatalog.deliveryClass : #A
+@AbapCatalog.dataMaintenance : #ALLOWED
+define table /cellag/repdau {
+
+  key mandt       : mandt not null;
+  key wktnr       : wktnr not null;
+  key wktps       : wktps not null;
+  key /cellag/akz : /cellag/cs_akz not null;
+  key kunwe       : kunwe not null;
+  dauer           : bca_us_nodays;
+  kaltage         : /cellag/kaltage;
+  otdstart        : /cellag/otdstart;
+  rsende          : /cellag/repdau_rsende;
+
+}

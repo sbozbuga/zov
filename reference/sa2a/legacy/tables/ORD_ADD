@@ -1,0 +1,46 @@
+@EndUserText.label : 'Auftrags- und Meldungsdaten manuell ergänzt'
+@AbapCatalog.enhancement.category : #EXTENSIBLE_CHARACTER_NUMERIC
+@AbapCatalog.tableCategory : #TRANSPARENT
+@AbapCatalog.deliveryClass : #A
+@AbapCatalog.dataMaintenance : #RESTRICTED
+define table /cellag/ord_add {
+
+  key mandt        : mandt not null;
+  key qmnum        : qmnum not null;
+  key fenum        : fenum not null;
+  key counter      : cim_count not null;
+  qmnum_z2         : /cellag/qmnum_z2;
+  deliverplan      : /cellag/deliverplan;
+  actualcommitdate : /cellag/delplandate;
+  lastcommitdate   : /cellag/lastcommitdate;
+  deliverplanhist  : /cellag/deliverplanhist;
+  recommitedhist   : /cellag/recommitedhist;
+  remarksrs        : /cellag/remarksrs;
+  timestamprs      : /cellag/timestamprs;
+  remarksoc        : /cellag/remarksoc;
+  timestampoc      : /cellag/timestampoc;
+  remarksvm        : /cellag/remarksvm;
+  timestampvm      : /cellag/timestampvm;
+  remarksspm       : /cellag/remarksspm;
+  timestampspm     : /cellag/timestamspm;
+  remarkspur       : /cellag/remarkspur;
+  timestamppur     : /cellag/timestamppur;
+  remarkslog       : /cellag/remarkslog;
+  timestamplog     : /cellag/timestamplog;
+  gsiremarks       : /cellag/remarksgsi;
+  changes          : /cellag/changes;
+  @AbapCatalog.foreignKey.screenCheck : true
+  status           : /cellag/gsi_status
+    with foreign key qpcd
+      where mandt = /cellag/ord_add.mandt
+        and katalogart = 'A'
+        and codegruppe = 'ZRLO01'
+        and code = /cellag/ord_add.status
+    with value help /cellag/status
+      where code = /cellag/ord_add.status;
+  priority         : /cellag/priority;
+  aedat            : aedat;
+  aeuhr            : aeuhr;
+  aenam            : aenam;
+
+}

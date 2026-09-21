@@ -1,0 +1,74 @@
+*&---------------------------------------------------------------------*
+*&  Include           /CELLAG/ORDER_DATA_FETCH_EVE
+*&---------------------------------------------------------------------*
+
+INITIALIZATION.
+  PERFORM get_initial_data.
+  PERFORM modify_screen.
+
+AT SELECTION-SCREEN ON VALUE-REQUEST FOR s_otgrp-low.
+  PERFORM get_values_otgrp USING s_otgrp-low.
+
+AT SELECTION-SCREEN ON VALUE-REQUEST FOR s_otgrp-high.
+  PERFORM get_values_otgrp USING s_otgrp-high.
+
+AT SELECTION-SCREEN OUTPUT.
+  PERFORM modify_screen.
+
+AT SELECTION-SCREEN.
+
+  CHECK ( sscrfields-ucomm EQ 'PRIN' OR sscrfields-ucomm EQ 'ONLI' ).
+  IF pa_old IS INITIAL AND
+     pa_new IS INITIAL.
+* Error message
+    CLEAR sscrfields-ucomm.
+    MESSAGE e000(/cellag/messages_sd) WITH TEXT-e00.
+  ENDIF.
+
+  "Selektion muss angegeben sein, falls Daten neu lesen angekreuzt
+  IF pa_new IS NOT INITIAL.
+    IF s_qmnum[] IS INITIAL AND
+       s_otgrp[] IS INITIAL AND
+       s_erdat[] IS INITIAL AND
+       s_parnr[] IS INITIAL.
+* Error message
+      CLEAR sscrfields-ucomm.
+      MESSAGE e000(/cellag/messages_sd) WITH 'Bitte Selektionskriterium eingeben (neu lesen)'(e02).
+    ENDIF.
+  ENDIF.
+
+*  PERFORM check_qmel_data.
+
+START-OF-SELECTION.
+  "Anzahl Datensätze bestimmen
+  IF p_selwr = abap_true.   "Selektionen ausgeben
+    PERFORM count_rows.
+  ENDIF.
+
+  PERFORM get_data.
+
+  IF NOT gt_qmfe[] IS INITIAL.
+
+    PERFORM build_data.
+
+
+    CASE pa_test.
+      WHEN c_true.
+        PERFORM write_list.
+      WHEN OTHERS.
+        PERFORM update_database.
+
+        "ZORDVIEW_CLOS_EX verarbeiten - auch bereits welche mit Archivflag
+        "Testprogramm Z_TEST_ZORDVIEW_CLOS_EX
+        PERFORM do_zordview_clos_ex.
+
+    ENDCASE.
+
+  ENDIF.
+
+  ycl_base=>write_replog( ).
+
+  IF p_selwr = abap_true.   "Selektionen ausgeben
+    PERFORM count_rows.
+    PERFORM write_protokoll.
+  ENDIF.

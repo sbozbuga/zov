@@ -1,0 +1,11 @@
+@EndUserText.label : 'Customizing Orderview PRCTR Herkunft aus Marc'
+@AbapCatalog.enhancement.category : #NOT_EXTENSIBLE
+@AbapCatalog.tableCategory : #TRANSPARENT
+@AbapCatalog.deliveryClass : #C
+@AbapCatalog.dataMaintenance : #ALLOWED
+define table zordview_prctr {
+
+  key mandt : mandt not null;
+  key otgrp : qcodegrp not null;
+
+}
