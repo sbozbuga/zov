@@ -1,0 +1,13 @@
+{
+  "BASEINFO": {
+    "FROM": [
+      "ADRC",
+      "MARA",
+      "MARC",
+      "QMFE",
+      "VBAP",
+      "VBPA",
+      "ZORDVIEW_PRCTR"
+    ]
+  }
+}

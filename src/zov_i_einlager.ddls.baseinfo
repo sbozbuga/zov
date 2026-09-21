@@ -1,0 +1,10 @@
+{
+  "BASEINFO": {
+    "FROM": [
+      "ZOV_I_STORAGE",
+      "ZOV_I_Z2NOTIF",
+      "VBAP",
+      "VBEP"
+    ]
+  }
+}

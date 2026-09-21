@@ -1,0 +1,15 @@
+{
+  "BASEINFO": {
+    "FROM": [
+      "ZOV_I_DOCKRECEIVE",
+      "ZOV_I_DOCK_ZPEPO",
+      "ZOV_I_EINLAGER",
+      "ZOV_I_FAORDER",
+      "ZOV_I_MATPARTNER",
+      "ZOV_I_NOTIFKEY",
+      "ZOV_I_PRICE",
+      "ZOV_I_SERIAL",
+      "ZOV_I_WKTNR_CUST"
+    ]
+  }
+}
