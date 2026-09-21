@@ -1,0 +1,11 @@
+{
+  "BASEINFO": {
+    "FROM": [
+      "ZOV_I_REPDAU",
+      "ZOV_I_WKTNR_BASE",
+      "T001W",
+      "ZORDVIEW_CUST1",
+      "ZORDVIEW_CUTOFFT"
+    ]
+  }
+}

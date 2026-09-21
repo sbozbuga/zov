@@ -1,0 +1,9 @@
+{
+  "BASEINFO": {
+    "FROM": [
+      "MKPF",
+      "OBJK",
+      "SER03"
+    ]
+  }
+}
